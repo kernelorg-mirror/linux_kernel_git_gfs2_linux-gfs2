@@ -294,8 +294,11 @@ static void clone_metapath(struct metapath *clone, struct metapath *mp)
 	unsigned int hgt;
 
 	*clone = *mp;
-	for (hgt = 0; hgt < mp->mp_aheight; hgt++)
+	for (hgt = 0; hgt < GFS2_MAX_META_HEIGHT; hgt++) {
+		if (mp->mp_bh[hgt] == NULL)
+			break;
 		get_bh(clone->mp_bh[hgt]);
+	}
 }
 
 static void gfs2_metapath_ra(struct gfs2_glock *gl, __be64 *start, __be64 *end)
