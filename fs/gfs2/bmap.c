@@ -795,45 +795,44 @@ out:
  * gfs2_alloc_size - Compute the maximum allocation size
  * @inode: The inode
  * @mp: The metapath
- * @size: Requested size in blocks
+ * @iomap: The iomap
  *
  * Compute the maximum size of the next allocation at @mp.
  *
  * Returns: size in blocks
  */
-static u64 gfs2_alloc_size(struct inode *inode, struct metapath *mp, u64 size)
+static u64 gfs2_alloc_size(struct inode *inode, struct metapath *mp,
+			   struct iomap *iomap)
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
-	const __be64 *first, *ptr, *end;
-
-	/*
-	 * For writes to stuffed files, this function is called twice via
-	 * gfs2_iomap_get, before and after unstuffing. The size we return the
-	 * first time needs to be large enough to get the reservation and
-	 * allocation sizes right.  The size we return the second time must
-	 * be exact or else gfs2_iomap_alloc won't do the right thing.
-	 */
+	u64 size = iomap->length >> inode->i_blkbits;
 
 	if (gfs2_is_stuffed(ip) || mp->mp_fheight != mp->mp_aheight) {
-		unsigned int maxsize = mp->mp_fheight > 1 ?
-			sdp->sd_inptrs : sdp->sd_diptrs;
+		unsigned int maxsize;
 
+		maxsize = mp->mp_fheight > 1 ? sdp->sd_inptrs : sdp->sd_diptrs;
 		maxsize -= mp->mp_list[mp->mp_fheight - 1];
+		if (gfs2_inode_contains_data(inode)) {
+			if (iomap->offset == 0)
+				maxsize = 1;
+		}
 		if (size > maxsize)
 			size = maxsize;
-		return size;
-	}
+	} else {
+		const __be64 *first, *ptr, *end;
 
-	first = metapointer(ip->i_height - 1, mp);
-	end = metaend(ip->i_height - 1, mp);
-	if (end - first > size)
-		end = first + size;
-	for (ptr = first; ptr < end; ptr++) {
-		if (*ptr)
-			break;
+		first = metapointer(ip->i_height - 1, mp);
+		end = metaend(ip->i_height - 1, mp);
+		if (end - first > size)
+			end = first + size;
+		for (ptr = first; ptr < end; ptr++) {
+			if (*ptr)
+				break;
+		}
+		size = ptr - first;
 	}
-	return ptr - first;
+	return size;
 }
 
 /**
@@ -963,7 +962,7 @@ do_alloc:
 		if (flags & IOMAP_DIRECT)
 			goto out;  /* (see gfs2_file_direct_write) */
 
-		len = gfs2_alloc_size(inode, mp, len);
+		len = gfs2_alloc_size(inode, mp, iomap);
 		alloc_size = len << inode->i_blkbits;
 		if (alloc_size < iomap->length)
 			iomap->length = alloc_size;
