@@ -32,14 +32,15 @@
 #include "trace_gfs2.h"
 
 /* This doesn't need to be that large as max 64 bit pointers in a 4k
- * block is 512, so __u16 is fine for that. It saves stack space to
+ * block is 512, so u16 is fine for that. It saves stack space to
  * keep it small.
  */
 struct metapath {
 	struct buffer_head *mp_bh[GFS2_MAX_META_HEIGHT];
-	__u16 mp_list[GFS2_MAX_META_HEIGHT];
-	int mp_fheight; /* find_metapath height */
-	int mp_aheight; /* actual height (lookup height) */
+	u16 mp_list[GFS2_MAX_META_HEIGHT];
+	u16 mp_data_blocks, mp_ind_blocks;
+	u8 mp_fheight; /* find_metapath height */
+	u8 mp_aheight; /* actual height (lookup height) */
 };
 
 static int punch_hole(struct gfs2_inode *ip, u64 offset, u64 length);
@@ -647,8 +648,7 @@ static int gfs2_iomap_alloc(struct inode *inode, struct iomap *iomap,
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
 	struct buffer_head *dibh = mp->mp_bh[0];
 	u64 bn;
-	unsigned n, i, blks, alloced = 0, iblks = 0;
-	size_t dblks = iomap->length >> inode->i_blkbits;
+	unsigned n, i, blks, alloced = 0;
 	const unsigned end_of_metadata = mp->mp_fheight - 1;
 	int ret;
 	enum alloc_state state;
@@ -657,7 +657,7 @@ static int gfs2_iomap_alloc(struct inode *inode, struct iomap *iomap,
 
 	BUG_ON(mp->mp_aheight < 1);
 	BUG_ON(dibh == NULL);
-	BUG_ON(dblks < 1);
+	BUG_ON(mp->mp_data_blocks < 1);
 
 	gfs2_trans_add_meta(ip->i_gl, dibh);
 
@@ -668,32 +668,18 @@ static int gfs2_iomap_alloc(struct inode *inode, struct iomap *iomap,
 		state = ALLOC_DATA;
 	} else {
 		/* Need to allocate indirect blocks */
-		iblks = mp->mp_fheight - mp->mp_aheight;
-		/*
-		 * If the height doesn't increase or the inode doesn't contain
-		 * any pointers, we can go straight to extending the tree down.
-		 */
 		if (mp->mp_fheight == ip->i_height || !contains_data) {
 			/* Extend tree down */
 			state = ALLOC_GROW_DEPTH;
 		} else {
 			/* Build up tree height */
 			state = ALLOC_GROW_HEIGHT;
-			iblks += mp->mp_fheight - ip->i_height;
-			if (mp->mp_list[0] == 0) {
-				/*
-				 * The metapath for growing the height and the
-				 * metapath for the new allocation start with
-				 * the same block; only allocate it once.
-				 */
-				iblks--;
-			}
 		}
 	}
 
 	/* start of the second part of the function (state machine) */
 
-	blks = dblks + iblks;
+	blks = mp->mp_data_blocks + mp->mp_ind_blocks;
 	i = mp->mp_aheight;
 	do {
 		n = blks - alloced;
@@ -763,12 +749,13 @@ static int gfs2_iomap_alloc(struct inode *inode, struct iomap *iomap,
 				break;
 		/* Tree complete, adding data blocks */
 		case ALLOC_DATA:
-			BUG_ON(n > dblks);
+			BUG_ON(n > mp->mp_data_blocks);
 			BUG_ON(mp->mp_bh[end_of_metadata] == NULL);
 			gfs2_trans_add_meta(ip->i_gl, mp->mp_bh[end_of_metadata]);
-			dblks = n;
 			ptr = metapointer(end_of_metadata, mp);
 			iomap->addr = bn << inode->i_blkbits;
+			iomap->length = (u64)n << inode->i_blkbits;
+			iomap->type = IOMAP_MAPPED;
 			iomap->flags |= IOMAP_F_MERGED | IOMAP_F_NEW;
 			while (n-- > 0)
 				*ptr++ = cpu_to_be64(bn++);
@@ -776,8 +763,6 @@ static int gfs2_iomap_alloc(struct inode *inode, struct iomap *iomap,
 		}
 	} while (iomap->addr == IOMAP_NULL_ADDR);
 
-	iomap->type = IOMAP_MAPPED;
-	iomap->length = (u64)dblks << inode->i_blkbits;
 	ip->i_height = mp->mp_fheight;
 	gfs2_add_inode_blocks(&ip->i_inode, alloced);
 	gfs2_dinode_out(ip, dibh->b_data);
@@ -793,16 +778,19 @@ out:
  * @inode: The inode
  * @mp: The metapath
  * @iomap: The iomap
+ * @contains_data: False if the inode is known empty
  *
  * Compute the maximum size of the next allocation at @mp.
  */
 static void gfs2_compute_alloc_size(struct inode *inode, struct metapath *mp,
-				    struct iomap *iomap)
+				    struct iomap *iomap, bool contains_data)
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
 	u64 len = iomap->length >> inode->i_blkbits;
 
+	mp->mp_data_blocks = 0;
+	mp->mp_ind_blocks = 0;
 	if (gfs2_is_stuffed(ip) || mp->mp_fheight != mp->mp_aheight) {
 		unsigned int maxlen;
 
@@ -811,9 +799,43 @@ static void gfs2_compute_alloc_size(struct inode *inode, struct metapath *mp,
 		if (gfs2_inode_contains_data(inode)) {
 			if (iomap->offset == 0)
 				maxlen = 1;
+			else if (gfs2_is_stuffed(ip))
+				mp->mp_data_blocks++;
 		}
 		if (len > maxlen)
 			len = maxlen;
+
+		if (mp->mp_fheight != mp->mp_aheight) {
+			unsigned int h;
+
+			/* Fill out the metadata tree to its full height. */
+			mp->mp_ind_blocks += mp->mp_fheight - mp->mp_aheight;
+
+			/*
+			 * When growing the height, going from height 0 to 1
+			 * requires no indirect blocks.  Going any further
+			 * requires one indirect block for each level.
+			 */
+			h = max_t(unsigned int, ip->i_height, 1);
+			if (mp->mp_fheight > h && contains_data) {
+				mp->mp_ind_blocks += mp->mp_fheight - h;
+				/*
+				 * If the metapath for growing the height and
+				 * the metapath for the new allocation start
+				 * with the same block, we only need to account
+				 * for that block once.
+				 *
+				 * (This kind of overlap is possible because
+				 * indirect blocks contain more pointers than
+				 * the inode.  When we grow the height, a write
+				 * that would have gone beyond the last pointer
+				 * in the inode may still go into the first
+				 * indirect block.)
+				 */
+				if (mp->mp_list[0] == 0)
+					mp->mp_ind_blocks--;
+			}
+		}
 	} else {
 		const __be64 *first, *ptr, *end;
 
@@ -827,6 +849,7 @@ static void gfs2_compute_alloc_size(struct inode *inode, struct metapath *mp,
 		}
 		len = ptr - first;
 	}
+	mp->mp_data_blocks += len;
 	iomap->length = len << inode->i_blkbits;
 }
 
@@ -1014,7 +1037,7 @@ static int gfs2_iomap_begin_write(struct inode *inode, loff_t pos,
 	struct metapath mp = { .mp_aheight = 1, };
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
-	unsigned int data_blocks = 0, ind_blocks = 0, rblocks;
+	unsigned int rblocks;
 	bool contains_data, unstuff, alloc_required;
 	int ret;
 
@@ -1034,15 +1057,11 @@ static int gfs2_iomap_begin_write(struct inode *inode, loff_t pos,
 	alloc_required = unstuff || iomap->type == IOMAP_HOLE;
 
 	if (iomap->type == IOMAP_HOLE)
-		gfs2_compute_alloc_size(inode, &mp, iomap);
-
-	if (alloc_required || gfs2_is_jdata(ip))
-		gfs2_write_calc_reserv(ip, iomap->length, &data_blocks,
-				       &ind_blocks);
+		gfs2_compute_alloc_size(inode, &mp, iomap, contains_data);
 
 	if (alloc_required) {
 		struct gfs2_alloc_parms ap = {
-			.target = data_blocks + ind_blocks
+			.target = mp.mp_data_blocks + mp.mp_ind_blocks
 		};
 
 		ret = gfs2_quota_lock_check(ip, &ap);
@@ -1054,15 +1073,16 @@ static int gfs2_iomap_begin_write(struct inode *inode, loff_t pos,
 			goto out_qunlock;
 	}
 
-	rblocks = RES_DINODE + ind_blocks;
+	rblocks = RES_DINODE + mp.mp_ind_blocks;
 	if (gfs2_is_jdata(ip))
-		rblocks += data_blocks;
-	if (ind_blocks || data_blocks)
+		rblocks += mp.mp_data_blocks;
+	if (mp.mp_ind_blocks || mp.mp_data_blocks)
 		rblocks += RES_STATFS + RES_QUOTA;
 	if (inode == sdp->sd_rindex)
 		rblocks += 2 * RES_STATFS;
 	if (alloc_required)
-		rblocks += gfs2_rg_blocks(ip, data_blocks + ind_blocks);
+		rblocks += gfs2_rg_blocks(ip, mp.mp_data_blocks +
+					      mp.mp_ind_blocks);
 
 	ret = gfs2_trans_begin(sdp, rblocks, iomap->length >> inode->i_blkbits);
 	if (ret)
@@ -1074,6 +1094,10 @@ static int gfs2_iomap_begin_write(struct inode *inode, loff_t pos,
 		ret = __gfs2_unstuff_dinode(ip, NULL, dibh, contains_data);
 		if (ret)
 			goto out_trans_end;
+		if (contains_data) {
+			BUG_ON(mp.mp_data_blocks < 1);
+			mp.mp_data_blocks--;
+		}
 		release_metapath(&mp);
 		brelse(iomap->private);
 		iomap->private = NULL;
@@ -1234,9 +1258,12 @@ int gfs2_block_map(struct inode *inode, sector_t lblock,
 	if (create) {
 		ret = gfs2_iomap_get(inode, pos, length, IOMAP_WRITE, &iomap, &mp);
 		if (!ret && iomap.type == IOMAP_HOLE) {
-			gfs2_compute_alloc_size(inode, &mp, &iomap);
+			bool contains_data = gfs2_inode_contains_data(inode);
+
+			gfs2_compute_alloc_size(inode, &mp, &iomap,
+						contains_data);
 			ret = gfs2_iomap_alloc(inode, &iomap, IOMAP_WRITE, &mp,
-					       gfs2_inode_contains_data(inode));
+					       contains_data);
 		}
 		release_metapath(&mp);
 	} else {
@@ -1467,9 +1494,11 @@ int gfs2_iomap_get_alloc(struct inode *inode, loff_t pos, loff_t length,
 
 	ret = gfs2_iomap_get(inode, pos, length, IOMAP_WRITE, iomap, &mp);
 	if (!ret && iomap->type == IOMAP_HOLE) {
-		gfs2_compute_alloc_size(inode, &mp, iomap);
+		bool contains_data = gfs2_inode_contains_data(inode);
+
+		gfs2_compute_alloc_size(inode, &mp, iomap, contains_data);
 		ret = gfs2_iomap_alloc(inode, iomap, IOMAP_WRITE, &mp,
-				       gfs2_inode_contains_data(inode));
+				       contains_data);
 	}
 	release_metapath(&mp);
 	return ret;
