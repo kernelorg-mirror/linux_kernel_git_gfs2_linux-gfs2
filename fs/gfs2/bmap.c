@@ -44,6 +44,18 @@ struct metapath {
 
 static int punch_hole(struct gfs2_inode *ip, u64 offset, u64 length);
 
+/*
+ * gfs2_inode_contains_data - check if inode contains any data
+ *
+ * Return true if the inode contains (or may contain) data or indirect blocks.
+ */
+static bool gfs2_inode_contains_data(struct inode *inode)
+{
+	struct gfs2_inode *ip = GFS2_I(inode);
+
+	return !gfs2_is_stuffed(ip) || i_size_read(inode) > 0;
+}
+
 /**
  * gfs2_unstuffer_page - unstuff a stuffed inode into a block cached by a page
  * @ip: the inode
@@ -107,6 +119,60 @@ static int gfs2_unstuffer_page(struct gfs2_inode *ip, struct buffer_head *dibh,
 	return 0;
 }
 
+static int __gfs2_unstuff_dinode(struct gfs2_inode *ip, struct page *page,
+				 struct buffer_head *dibh, bool contains_data)
+{
+	struct buffer_head *bh;
+	struct gfs2_dinode *di;
+	u64 block = 0;
+	int isdir = gfs2_is_dir(ip);
+	int error = 0;
+
+	down_write(&ip->i_rw_mutex);
+
+	if (contains_data) {
+		/* Get a free block, fill it with the stuffed data,
+		   and write it out to disk */
+
+		unsigned int n = 1;
+		error = gfs2_alloc_blocks(ip, &block, &n, 0, NULL);
+		if (error)
+			goto out;
+		if (isdir) {
+			gfs2_trans_add_unrevoke(GFS2_SB(&ip->i_inode), block, 1);
+			error = gfs2_dir_get_new_buffer(ip, block, &bh);
+			if (error)
+				goto out;
+			gfs2_buffer_copy_tail(bh, sizeof(struct gfs2_meta_header),
+					      dibh, sizeof(struct gfs2_dinode));
+			brelse(bh);
+		} else {
+			error = gfs2_unstuffer_page(ip, dibh, block, page);
+			if (error)
+				goto out;
+		}
+	}
+
+	/*  Set up the pointer to the new block  */
+
+	gfs2_trans_add_meta(ip->i_gl, dibh);
+	di = (struct gfs2_dinode *)dibh->b_data;
+	gfs2_buffer_clear_tail(dibh, sizeof(struct gfs2_dinode));
+
+	if (contains_data) {
+		*(__be64 *)(di + 1) = cpu_to_be64(block);
+		gfs2_add_inode_blocks(&ip->i_inode, 1);
+		di->di_blocks = cpu_to_be64(gfs2_get_inode_blocks(&ip->i_inode));
+	}
+
+	ip->i_height = 1;
+	di->di_height = cpu_to_be16(1);
+
+out:
+	up_write(&ip->i_rw_mutex);
+	return error;
+}
+
 /**
  * gfs2_unstuff_dinode - Unstuff a dinode when the data has grown too big
  * @ip: The GFS2 inode to unstuff
@@ -120,63 +186,17 @@ static int gfs2_unstuffer_page(struct gfs2_inode *ip, struct buffer_head *dibh,
 
 int gfs2_unstuff_dinode(struct gfs2_inode *ip, struct page *page)
 {
-	struct buffer_head *bh, *dibh;
-	struct gfs2_dinode *di;
-	u64 block = 0;
-	int isdir = gfs2_is_dir(ip);
+	bool contains_data = gfs2_inode_contains_data(&ip->i_inode);
+	struct buffer_head *dibh;
 	int error;
-
-	down_write(&ip->i_rw_mutex);
 
 	error = gfs2_meta_inode_buffer(ip, &dibh);
 	if (error)
-		goto out;
-
-	if (i_size_read(&ip->i_inode)) {
-		/* Get a free block, fill it with the stuffed data,
-		   and write it out to disk */
-
-		unsigned int n = 1;
-		error = gfs2_alloc_blocks(ip, &block, &n, 0, NULL);
-		if (error)
-			goto out_brelse;
-		if (isdir) {
-			gfs2_trans_add_unrevoke(GFS2_SB(&ip->i_inode), block, 1);
-			error = gfs2_dir_get_new_buffer(ip, block, &bh);
-			if (error)
-				goto out_brelse;
-			gfs2_buffer_copy_tail(bh, sizeof(struct gfs2_meta_header),
-					      dibh, sizeof(struct gfs2_dinode));
-			brelse(bh);
-		} else {
-			error = gfs2_unstuffer_page(ip, dibh, block, page);
-			if (error)
-				goto out_brelse;
-		}
-	}
-
-	/*  Set up the pointer to the new block  */
-
-	gfs2_trans_add_meta(ip->i_gl, dibh);
-	di = (struct gfs2_dinode *)dibh->b_data;
-	gfs2_buffer_clear_tail(dibh, sizeof(struct gfs2_dinode));
-
-	if (i_size_read(&ip->i_inode)) {
-		*(__be64 *)(di + 1) = cpu_to_be64(block);
-		gfs2_add_inode_blocks(&ip->i_inode, 1);
-		di->di_blocks = cpu_to_be64(gfs2_get_inode_blocks(&ip->i_inode));
-	}
-
-	ip->i_height = 1;
-	di->di_height = cpu_to_be16(1);
-
-out_brelse:
+		return error;
+	error = __gfs2_unstuff_dinode(ip, page, dibh, contains_data);
 	brelse(dibh);
-out:
-	up_write(&ip->i_rw_mutex);
 	return error;
 }
-
 
 /**
  * find_metapath - Find path through the metadata tree
@@ -1044,7 +1064,10 @@ static int gfs2_iomap_begin_write(struct inode *inode, loff_t pos,
 		goto out_trans_fail;
 
 	if (unstuff) {
-		ret = gfs2_unstuff_dinode(ip, NULL);
+		bool contains_data = gfs2_inode_contains_data(inode);
+		struct buffer_head *dibh = mp.mp_bh[0];
+
+		ret = __gfs2_unstuff_dinode(ip, NULL, dibh, contains_data);
 		if (ret)
 			goto out_trans_end;
 		release_metapath(&mp);
@@ -2076,7 +2099,7 @@ static int do_grow(struct inode *inode, u64 size)
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
 	struct gfs2_alloc_parms ap = { .target = 1, };
-	struct buffer_head *dibh;
+	struct buffer_head *dibh = NULL;
 	int error;
 	int unstuff = 0;
 
@@ -2097,23 +2120,26 @@ static int do_grow(struct inode *inode, u64 size)
 	if (error)
 		goto do_grow_release;
 
-	if (unstuff) {
-		error = gfs2_unstuff_dinode(ip, NULL);
-		if (error)
-			goto do_end_trans;
-	}
-
 	error = gfs2_meta_inode_buffer(ip, &dibh);
 	if (error)
 		goto do_end_trans;
+
+	if (unstuff) {
+		bool contains_data = gfs2_inode_contains_data(inode);
+
+		error = __gfs2_unstuff_dinode(ip, NULL, dibh, contains_data);
+		if (error)
+			goto do_end_trans;
+	}
 
 	i_size_write(inode, size);
 	ip->i_inode.i_mtime = ip->i_inode.i_ctime = current_time(&ip->i_inode);
 	gfs2_trans_add_meta(ip->i_gl, dibh);
 	gfs2_dinode_out(ip, dibh->b_data);
-	brelse(dibh);
 
 do_end_trans:
+	if (dibh)
+		brelse(dibh);
 	gfs2_trans_end(sdp);
 do_grow_release:
 	if (unstuff) {
