@@ -806,33 +806,33 @@ static u64 gfs2_alloc_size(struct inode *inode, struct metapath *mp,
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
-	u64 size = iomap->length >> inode->i_blkbits;
+	u64 len = iomap->length >> inode->i_blkbits;
 
 	if (gfs2_is_stuffed(ip) || mp->mp_fheight != mp->mp_aheight) {
-		unsigned int maxsize;
+		unsigned int maxlen;
 
-		maxsize = mp->mp_fheight > 1 ? sdp->sd_inptrs : sdp->sd_diptrs;
-		maxsize -= mp->mp_list[mp->mp_fheight - 1];
+		maxlen = mp->mp_fheight > 1 ? sdp->sd_inptrs : sdp->sd_diptrs;
+		maxlen -= mp->mp_list[mp->mp_fheight - 1];
 		if (gfs2_inode_contains_data(inode)) {
 			if (iomap->offset == 0)
-				maxsize = 1;
+				maxlen = 1;
 		}
-		if (size > maxsize)
-			size = maxsize;
+		if (len > maxlen)
+			len = maxlen;
 	} else {
 		const __be64 *first, *ptr, *end;
 
 		first = metapointer(ip->i_height - 1, mp);
 		end = metaend(ip->i_height - 1, mp);
-		if (end - first > size)
-			end = first + size;
+		if (end - first > len)
+			end = first + len;
 		for (ptr = first; ptr < end; ptr++) {
 			if (*ptr)
 				break;
 		}
-		size = ptr - first;
+		len = ptr - first;
 	}
-	return size;
+	return len;
 }
 
 /**
