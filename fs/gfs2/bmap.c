@@ -624,9 +624,6 @@ enum alloc_state {
  *  ii) Indirect blocks to fill in lower part of the metadata tree
  * iii) Data blocks
  *
- * This function is called after gfs2_iomap_get, which works out the
- * total number of blocks which we need via gfs2_alloc_size.
- *
  * We then do the actual allocation asking for an extent at a time (if
  * enough contiguous free blocks are available, there will only be one
  * allocation request per call) and uses the state machine to initialise
@@ -792,17 +789,15 @@ out:
 #define IOMAP_F_GFS2_BOUNDARY IOMAP_F_PRIVATE
 
 /**
- * gfs2_alloc_size - Compute the maximum allocation size
+ * gfs2_compute_alloc_size - Compute the maximum allocation size
  * @inode: The inode
  * @mp: The metapath
  * @iomap: The iomap
  *
  * Compute the maximum size of the next allocation at @mp.
- *
- * Returns: size in blocks
  */
-static u64 gfs2_alloc_size(struct inode *inode, struct metapath *mp,
-			   struct iomap *iomap)
+static void gfs2_compute_alloc_size(struct inode *inode, struct metapath *mp,
+				    struct iomap *iomap)
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
@@ -832,7 +827,7 @@ static u64 gfs2_alloc_size(struct inode *inode, struct metapath *mp,
 		}
 		len = ptr - first;
 	}
-	return len;
+	iomap->length = len << inode->i_blkbits;
 }
 
 /**
@@ -956,17 +951,7 @@ do_alloc:
 			ret = gfs2_hole_size(inode, lblock, len, mp, iomap);
 		else
 			iomap->length = size - pos;
-	} else if (flags & IOMAP_WRITE) {
-		u64 alloc_size;
-
-		if (flags & IOMAP_DIRECT)
-			goto out;  /* (see gfs2_file_direct_write) */
-
-		len = gfs2_alloc_size(inode, mp, iomap);
-		alloc_size = len << inode->i_blkbits;
-		if (alloc_size < iomap->length)
-			iomap->length = alloc_size;
-	} else {
+	} else if (!(flags & IOMAP_WRITE)) {
 		if (pos < size && height == ip->i_height)
 			ret = gfs2_hole_size(inode, lblock, len, mp, iomap);
 	}
@@ -1047,6 +1032,9 @@ static int gfs2_iomap_begin_write(struct inode *inode, loff_t pos,
 		goto out_release;
 
 	alloc_required = unstuff || iomap->type == IOMAP_HOLE;
+
+	if (iomap->type == IOMAP_HOLE)
+		gfs2_compute_alloc_size(inode, &mp, iomap);
 
 	if (alloc_required || gfs2_is_jdata(ip))
 		gfs2_write_calc_reserv(ip, iomap->length, &data_blocks,
@@ -1245,9 +1233,11 @@ int gfs2_block_map(struct inode *inode, sector_t lblock,
 
 	if (create) {
 		ret = gfs2_iomap_get(inode, pos, length, IOMAP_WRITE, &iomap, &mp);
-		if (!ret && iomap.type == IOMAP_HOLE)
+		if (!ret && iomap.type == IOMAP_HOLE) {
+			gfs2_compute_alloc_size(inode, &mp, &iomap);
 			ret = gfs2_iomap_alloc(inode, &iomap, IOMAP_WRITE, &mp,
 					       gfs2_inode_contains_data(inode));
+		}
 		release_metapath(&mp);
 	} else {
 		ret = gfs2_iomap_get(inode, pos, length, 0, &iomap, &mp);
@@ -1476,9 +1466,11 @@ int gfs2_iomap_get_alloc(struct inode *inode, loff_t pos, loff_t length,
 	int ret;
 
 	ret = gfs2_iomap_get(inode, pos, length, IOMAP_WRITE, iomap, &mp);
-	if (!ret && iomap->type == IOMAP_HOLE)
+	if (!ret && iomap->type == IOMAP_HOLE) {
+		gfs2_compute_alloc_size(inode, &mp, iomap);
 		ret = gfs2_iomap_alloc(inode, iomap, IOMAP_WRITE, &mp,
 				       gfs2_inode_contains_data(inode));
+	}
 	release_metapath(&mp);
 	return ret;
 }
