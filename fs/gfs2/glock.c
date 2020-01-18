@@ -465,12 +465,10 @@ static void state_change(struct gfs2_glock *gl, unsigned int new_state)
 	gl->gl_tchange = jiffies;
 }
 
-static void gfs2_demote_wake(struct gfs2_glock *gl)
+static void gfs2_demote(struct gfs2_glock *gl)
 {
 	gl->gl_demote_state = LM_ST_EXCLUSIVE;
 	clear_bit(GLF_DEMOTE, &gl->gl_flags);
-	smp_mb__after_atomic();
-	wake_up_bit(&gl->gl_flags, GLF_DEMOTE);
 }
 
 /**
@@ -538,7 +536,7 @@ retry:
 
 	/* Fast path - we got what we asked for */
 	if (test_and_clear_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags))
-		gfs2_demote_wake(gl);
+		gfs2_demote(gl);
 	if (state != LM_ST_UNLOCKED) {
 		if (glops->go_xmote_bh) {
 			spin_unlock(&gl->gl_lockref.lock);
@@ -730,7 +728,7 @@ __acquires(&gl->gl_lockref.lock)
 		gl->gl_target = gl->gl_demote_state;
 	} else {
 		if (test_bit(GLF_DEMOTE, &gl->gl_flags))
-			gfs2_demote_wake(gl);
+			gfs2_demote(gl);
 		ret = do_promote(gl);
 		if (ret == 0)
 			goto out_unlock;
@@ -1364,14 +1362,6 @@ void gfs2_glock_dq(struct gfs2_holder *gh)
 		__gfs2_glock_queue_work(gl, delay);
 	}
 	spin_unlock(&gl->gl_lockref.lock);
-}
-
-void gfs2_glock_dq_wait(struct gfs2_holder *gh)
-{
-	struct gfs2_glock *gl = gh->gh_gl;
-	gfs2_glock_dq(gh);
-	might_sleep();
-	wait_on_bit(&gl->gl_flags, GLF_DEMOTE, TASK_UNINTERRUPTIBLE);
 }
 
 /**
