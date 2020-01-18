@@ -1335,7 +1335,7 @@ alloc_failed:
 	if (gfs2_holder_initialized(&ip->i_iopen_gh) &&
 	    test_bit(HIF_HOLDER, &ip->i_iopen_gh.gh_iflags)) {
 		ip->i_iopen_gh.gh_flags |= GL_NOCACHE;
-		gfs2_glock_dq_wait(&ip->i_iopen_gh);
+		gfs2_glock_dq(&ip->i_iopen_gh);
 		gfs2_holder_reinit(LM_ST_EXCLUSIVE, LM_FLAG_TRY_1CB | GL_NOCACHE,
 				   &ip->i_iopen_gh);
 		error = gfs2_glock_nq(&ip->i_iopen_gh);
