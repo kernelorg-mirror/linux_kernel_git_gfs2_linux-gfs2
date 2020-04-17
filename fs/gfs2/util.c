@@ -122,10 +122,8 @@ static void signal_our_withdraw(struct gfs2_sbd *sdp)
 	/*
 	 * Drop the glock for our journal so another node can recover it.
 	 */
-	if (gfs2_holder_initialized(&sdp->sd_journal_gh)) {
-		gfs2_glock_dq_wait(&sdp->sd_journal_gh);
-		gfs2_holder_uninit(&sdp->sd_journal_gh);
-	}
+	if (gfs2_holder_initialized(&sdp->sd_journal_gh))
+		gfs2_glock_dq_uninit(&sdp->sd_journal_gh);
 	sdp->sd_jinode_gh.gh_flags |= GL_NOCACHE;
 	gfs2_glock_dq(&sdp->sd_jinode_gh);
 	if (test_bit(SDF_FS_FROZEN, &sdp->sd_flags)) {
@@ -167,7 +165,7 @@ static void signal_our_withdraw(struct gfs2_sbd *sdp)
 	 * Dequeue the "live" glock, but keep a reference so it's never freed.
 	 */
 	gfs2_glock_hold(gl);
-	gfs2_glock_dq_wait(&sdp->sd_live_gh);
+	gfs2_glock_dq(&sdp->sd_live_gh);
 	/*
 	 * We enqueue the "live" glock in EX so that all other nodes
 	 * get a demote request and act on it. We don't really want the
@@ -175,7 +173,8 @@ static void signal_our_withdraw(struct gfs2_sbd *sdp)
 	 */
 	fs_warn(sdp, "Requesting recovery of jid %d.\n",
 		sdp->sd_lockstruct.ls_jid);
-	gfs2_holder_reinit(LM_ST_EXCLUSIVE, LM_FLAG_TRY_1CB | LM_FLAG_NOEXP,
+	gfs2_holder_reinit(LM_ST_EXCLUSIVE,
+			   LM_FLAG_TRY_1CB | LM_FLAG_NOEXP | GL_NOCACHE,
 			   &sdp->sd_live_gh);
 	msleep(GL_GLOCK_MAX_HOLD);
 	/*
@@ -199,8 +198,9 @@ static void signal_our_withdraw(struct gfs2_sbd *sdp)
 		if (gfs2_recover_journal(sdp->sd_jdesc, 1))
 			fs_warn(sdp, "Unable to recover our journal jid %d.\n",
 				sdp->sd_lockstruct.ls_jid);
-		gfs2_glock_dq_wait(&sdp->sd_live_gh);
-		gfs2_holder_reinit(LM_ST_SHARED, LM_FLAG_NOEXP | GL_EXACT,
+		gfs2_glock_dq(&sdp->sd_live_gh);
+		gfs2_holder_reinit(LM_ST_SHARED,
+				   LM_FLAG_NOEXP | GL_EXACT | GL_NOCACHE,
 				   &sdp->sd_live_gh);
 		gfs2_glock_nq(&sdp->sd_live_gh);
 	}
