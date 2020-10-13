@@ -1570,7 +1570,7 @@ static void rg_mblk_search(struct gfs2_rgrpd *rgd, struct gfs2_inode *ip,
 		extlen = 1;
 	else {
 		extlen = max_t(u32, atomic_read(&ip->i_sizehint), ap->target);
-		extlen = clamp(extlen, (u32)RGRP_RSRV_MINBLKS, free_blocks);
+		extlen = max_t(u32, extlen, RGRP_RSRV_MINBLKS);
 	}
 	if ((rgd->rd_free_clone < rgd->rd_reserved) || (free_blocks < extlen))
 		return;
