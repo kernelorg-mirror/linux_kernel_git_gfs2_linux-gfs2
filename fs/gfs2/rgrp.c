@@ -646,10 +646,7 @@ static void __rs_deltree(struct gfs2_blkreserv *rs)
 	RB_CLEAR_NODE(&rs->rs_node);
 
 	if (rs->rs_requested) {
-		/* return requested blocks to the rgrp */
-		BUG_ON(rs->rs_rgd->rd_requested < rs->rs_requested);
-		rs->rs_rgd->rd_requested -= rs->rs_requested;
-
+		rgd->rd_requested -= rs->rs_requested;
 		/* The rgrp extent failure point is likely not to increase;
 		   it will only do so if the freed blocks are somehow
 		   contiguous with a span of free blocks that follows. Still,
@@ -1522,39 +1519,9 @@ static void rs_insert(struct gfs2_inode *ip)
 
 	rb_link_node(&rs->rs_node, parent, newn);
 	rb_insert_color(&rs->rs_node, &rgd->rd_rstree);
-
-	/* Do our rgrp accounting for the reservation */
-	rgd->rd_requested += rs->rs_requested; /* blocks requested */
+	rgd->rd_requested += rs->rs_requested;
 	spin_unlock(&rgd->rd_rsspin);
 	trace_gfs2_rs(rs, TRACE_RS_INSERT);
-}
-
-/**
- * rgd_free - return the number of free blocks we can allocate.
- * @rgd: the resource group
- *
- * This function returns the number of free blocks for an rgrp.
- * That's the clone-free blocks (blocks that are free, not including those
- * still being used for unlinked files that haven't been deleted.)
- *
- * It also subtracts any blocks reserved by someone else, but does not
- * include free blocks that are still part of our current reservation,
- * because obviously we can (and will) allocate them.
- */
-static inline u32 rgd_free(struct gfs2_rgrpd *rgd, struct gfs2_blkreserv *rs)
-{
-	u32 tot_reserved, tot_free;
-
-	if (WARN_ON_ONCE(rgd->rd_requested < rs->rs_requested))
-		return 0;
-	tot_reserved = rgd->rd_requested - rs->rs_requested;
-
-	if (rgd->rd_free_clone < tot_reserved)
-		tot_reserved = 0;
-
-	tot_free = rgd->rd_free_clone - tot_reserved;
-
-	return tot_free;
 }
 
 /**
@@ -1572,7 +1539,7 @@ static void rg_mblk_search(struct gfs2_rgrpd *rgd, struct gfs2_inode *ip,
 	u64 goal;
 	struct gfs2_blkreserv *rs = &ip->i_res;
 	u32 extlen;
-	u32 free_blocks, blocks_available;
+	u32 blocks_available;
 	int ret;
 	struct inode *inode = &ip->i_inode;
 
@@ -1584,14 +1551,11 @@ static void rg_mblk_search(struct gfs2_rgrpd *rgd, struct gfs2_inode *ip,
 	}
 
 	spin_lock(&rgd->rd_rsspin);
-	free_blocks = rgd_free(rgd, rs);
-	if (rgd->rd_free_clone < rgd->rd_requested)
-		free_blocks = 0;
 	blocks_available = rgd->rd_free_clone - rgd->rd_reserved;
 	if (rgd == rs->rs_rgd)
 		blocks_available += rs->rs_reserved;
 	spin_unlock(&rgd->rd_rsspin);
-	if (free_blocks < extlen || blocks_available < extlen)
+	if (blocks_available < extlen)
 		return;
 
 	/* Find bitmap block that contains bits for goal block */
@@ -2032,6 +1996,26 @@ static inline int fast_to_acquire(struct gfs2_rgrpd *rgd)
 	return 0;
 }
 
+static bool gfs2_trim_requested_blocks(struct gfs2_rgrpd *rgd)
+{
+	u32 limit = (rgd->rd_free_clone - rgd->rd_reserved) / 2;
+	struct gfs2_blkreserv *rs, *next;
+	bool trimmed = false;
+
+	if (rgd->rd_requested <= limit)
+		goto out;
+	rbtree_postorder_for_each_entry_safe(rs, next, &rgd->rd_rstree, rs_node) {
+		if (rs->rs_reserved)
+			continue;
+		__rs_deltree(rs);
+		if (rgd->rd_requested <= limit)
+			break;
+	}
+
+out:
+	return trimmed;
+}
+
 /**
  * gfs2_inplace_reserve - Reserve space in the filesystem
  * @ip: the inode to reserve space for
@@ -2057,7 +2041,7 @@ int gfs2_inplace_reserve(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap)
 	u64 last_unlinked = NO_BLOCK;
 	u32 target = ap->target;
 	int loops = 0;
-	u32 free_blocks, blocks_available, skip = 0;
+	u32 blocks_available, skip = 0;
 
 	BUG_ON(rs->rs_reserved);
 
@@ -2081,6 +2065,7 @@ int gfs2_inplace_reserve(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap)
 
 	while (loops < 3) {
 		struct gfs2_rgrpd *rgd;
+		bool retry = false;
 
 		rg_locked = gfs2_glock_is_locked_by_me(rs->rs_rgd->rd_gl);
 		if (rg_locked) {
@@ -2136,9 +2121,8 @@ int gfs2_inplace_reserve(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap)
 		/* If rgrp has enough free space, use it */
 		rgd = rs->rs_rgd;
 		spin_lock(&rgd->rd_rsspin);
-		free_blocks = rgd_free(rgd, rs);
 		blocks_available = rgd->rd_free_clone - rgd->rd_reserved;
-		if (free_blocks < target || blocks_available < target) {
+		if (blocks_available < target) {
 			spin_unlock(&rgd->rd_rsspin);
 			goto check_rgrp;
 		}
@@ -2146,7 +2130,13 @@ int gfs2_inplace_reserve(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap)
 		if (rs->rs_reserved > blocks_available)
 			rs->rs_reserved = blocks_available;
 		rgd->rd_reserved += rs->rs_reserved;
+		if (!gfs2_rs_active(rs)) {
+			if (gfs2_trim_requested_blocks(rgd))
+				retry = true;
+		}
 		spin_unlock(&rgd->rd_rsspin);
+		if (retry)
+			rg_mblk_search(rs->rs_rgd, ip, ap);
 		rgrp_unlock_local(rs->rs_rgd);
 		return 0;
 check_rgrp:
@@ -2302,11 +2292,11 @@ void gfs2_rgrp_dump(struct seq_file *seq, struct gfs2_rgrpd *rgd,
 	const struct rb_node *n;
 
 	spin_lock(&rgd->rd_rsspin);
-	gfs2_print_dbg(seq, "%s R: n:%llu f:%02x b:%u/%u i:%u q:%u r:%u e:%u\n",
+	gfs2_print_dbg(seq, "%s R: n:%llu f:%02x b:%u/%u i:%u r:%u e:%u\n",
 		       fs_id_buf,
 		       (unsigned long long)rgd->rd_addr, rgd->rd_flags,
 		       rgd->rd_free, rgd->rd_free_clone, rgd->rd_dinodes,
-		       rgd->rd_requested, rgd->rd_reserved, rgd->rd_extfail_pt);
+		       rgd->rd_reserved, rgd->rd_extfail_pt);
 	if (rgd->rd_sbd->sd_args.ar_rgrplvb) {
 		struct gfs2_rgrp_lvb *rgl = rgd->rd_rgl;
 
@@ -2465,7 +2455,7 @@ int gfs2_alloc_blocks(struct gfs2_inode *ip, u64 *bn, unsigned int *nblocks,
 	}
 	spin_lock(&rbm.rgd->rd_rsspin);
 	gfs2_adjust_reservation(ip, &rbm, *nblocks);
-	if (rbm.rgd->rd_free < *nblocks || rbm.rgd->rd_reserved < *nblocks) {
+	if (rbm.rgd->rd_reserved < *nblocks) {
 		fs_warn(sdp, "nblocks=%u\n", *nblocks);
 		spin_unlock(&rbm.rgd->rd_rsspin);
 		goto rgrp_error;
