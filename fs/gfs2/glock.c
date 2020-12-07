@@ -529,7 +529,9 @@ static void finish_xmote(struct gfs2_glock *gl, unsigned int ret)
 					list_move_tail(&gh->gh_list, &gl->gl_holders);
 				gh = find_first_waiter(gl);
 				gl->gl_target = gh->gh_mode;
-				goto retry;
+				do_xmote(gl, gh, gl->gl_target);
+				spin_unlock(&gl->gl_lockref.lock);
+				return;
 			}
 			/* Some error or failed "try lock" - report it */
 			if ((ret & LM_OUT_ERROR) ||
@@ -542,7 +544,6 @@ static void finish_xmote(struct gfs2_glock *gl, unsigned int ret)
 		switch(mode) {
 		/* Unlocked due to conversion deadlock, try again */
 		case LM_ST_UNLOCKED:
-retry:
 			do_xmote(gl, gh, gl->gl_target);
 			break;
 		/* Conversion fails, unlock and try again */
