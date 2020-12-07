@@ -744,10 +744,18 @@ __acquires(&gl->gl_lockref.lock)
 
 	if (test_bit(GLF_DEMOTE, &gl->gl_flags) &&
 	    gl->gl_demote_state != gl->gl_state) {
-		if (find_first_holder(gl))
-			goto out_unlock;
-		if (nonblock)
-			goto out_sched;
+		if (find_first_holder(gl)) {
+			clear_bit(GLF_LOCK, &gl->gl_flags);
+			smp_mb__after_atomic();
+			return;
+		}
+		if (nonblock) {
+			clear_bit(GLF_LOCK, &gl->gl_flags);
+			smp_mb__after_atomic();
+			gl->gl_lockref.count++;
+			__gfs2_glock_queue_work(gl, 0);
+			return;
+		}
 		set_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags);
 		GLOCK_BUG_ON(gl, gl->gl_demote_state == LM_ST_EXCLUSIVE);
 		gl->gl_target = gl->gl_demote_state;
@@ -755,30 +763,19 @@ __acquires(&gl->gl_lockref.lock)
 		if (test_bit(GLF_DEMOTE, &gl->gl_flags))
 			gfs2_demote_wake(gl);
 		ret = do_promote(gl);
-		if (ret == 0)
-			goto out_unlock;
+		if (ret == 0) {
+			clear_bit(GLF_LOCK, &gl->gl_flags);
+			smp_mb__after_atomic();
+			return;
+		}
 		if (ret == 2)
-			goto out;
+			return;
 		gh = find_first_waiter(gl);
 		gl->gl_target = gh->gh_state;
 		if (!(gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB)))
 			do_error(gl, 0); /* Fail queued try locks */
 	}
 	do_xmote(gl, gh, gl->gl_target);
-out:
-	return;
-
-out_sched:
-	clear_bit(GLF_LOCK, &gl->gl_flags);
-	smp_mb__after_atomic();
-	gl->gl_lockref.count++;
-	__gfs2_glock_queue_work(gl, 0);
-	return;
-
-out_unlock:
-	clear_bit(GLF_LOCK, &gl->gl_flags);
-	smp_mb__after_atomic();
-	return;
 }
 
 void gfs2_inode_remember_delete(struct gfs2_glock *gl, u64 generation)
