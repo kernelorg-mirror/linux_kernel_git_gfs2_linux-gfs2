@@ -57,8 +57,6 @@ struct gfs2_glock_iter {
 
 typedef void (*glock_examiner) (struct gfs2_glock * gl);
 
-static void do_xmote(struct gfs2_glock *gl);
-
 static struct dentry *gfs2_root;
 static struct workqueue_struct *glock_workqueue;
 struct workqueue_struct *gfs2_delete_workqueue;
@@ -519,7 +517,7 @@ static noinline void state_finish_xmote(struct gfs2_glock *gl)
 				if ((gh->gh_flags & LM_FLAG_PRIORITY) == 0)
 					list_move_tail(&gh->gh_list,
 						       &gl->gl_holders);
-				do_xmote(gl);
+				next_state(gl, GL_ST_DO_XMOTE);
 				return;
 			}
 			/* Some error or failed "try lock" - report it */
@@ -532,12 +530,12 @@ static noinline void state_finish_xmote(struct gfs2_glock *gl)
 		switch(mode) {
 		/* Unlocked due to conversion deadlock, try again */
 		case LM_ST_UNLOCKED:
-			do_xmote(gl);
+			next_state(gl, GL_ST_DO_XMOTE);
 			break;
 		/* Conversion fails, unlock and try again */
 		case LM_ST_SHARED:
 		case LM_ST_DEFERRED:
-			do_xmote(gl);
+			next_state(gl, GL_ST_DO_XMOTE);
 			break;
 		default: /* Everything else */
 			fs_err(gl->gl_name.ln_sbd, "requested %u got %u\n",
@@ -557,54 +555,6 @@ static noinline void state_finish_xmote(struct gfs2_glock *gl)
 	}
 out:
 	clear_bit(GLF_LOCK, &gl->gl_flags);
-}
-
-/**
- * __state_machine - the glock state machine
- * @gl: pointer to the glock we are transitioning
- * @new_state: The new state we need to execute
- *
- * This function handles state transitions for glocks.
- * When the state_machine is called, it's given a new state that needs to be
- * handled, but only after it becomes idle from the last call. Once called,
- * it keeps running until the state transitions have all been resolved.
- * The lock might be released inside some of the states, so we may need react
- * to state changes from other calls.
- */
-static void __state_machine(struct gfs2_glock *gl, int new_state)
-{
-	gl->gl_mchstrt = new_state;
-	BUG_ON(!spin_is_locked(&gl->gl_lockref.lock));
-
-	do {
-		switch (gl->gl_mch) {
-		case GL_ST_IDLE:
-			next_state(gl, new_state);
-			new_state = GL_ST_IDLE;
-			break;
-
-		case GL_ST_FINISH_XMOTE:
-			next_state(gl, GL_ST_IDLE);
-			state_finish_xmote(gl);
-			break;
-		}
-	} while (gl->gl_mch != GL_ST_IDLE);
-}
-
-/**
- * state_machine - the glock state machine
- * @gl: pointer to the glock we are transitioning
- * @new_state: The new state we need to execute
- *
- * Just like __state_machine but it acquires the gl_lockref lock
- */
-static void state_machine(struct gfs2_glock *gl, int new_state)
-__releases(&gl->gl_lockref.lock)
-__acquires(&gl->gl_lockref.lock)
-{
-	spin_lock(&gl->gl_lockref.lock);
-	__state_machine(gl, new_state);
-	spin_unlock(&gl->gl_lockref.lock);
 }
 
 /**
@@ -635,7 +585,7 @@ static inline u8 target_mode(const struct gfs2_glock *gl,
  *
  */
 
-static void do_xmote(struct gfs2_glock *gl)
+static noinline void state_do_xmote(struct gfs2_glock *gl)
 __releases(&gl->gl_lockref.lock)
 __acquires(&gl->gl_lockref.lock)
 {
@@ -745,6 +695,61 @@ out:
 }
 
 /**
+ * __state_machine - the glock state machine
+ * @gl: pointer to the glock we are transitioning
+ * @new_state: The new state we need to execute
+ *
+ * This function handles state transitions for glocks.
+ * When the state_machine is called, it's given a new state that needs to be
+ * handled, but only after it becomes idle from the last call. Once called,
+ * it keeps running until the state transitions have all been resolved.
+ * The lock might be released inside some of the states, so we may need react
+ * to state changes from other calls.
+ */
+static void __state_machine(struct gfs2_glock *gl, int new_state)
+{
+	gl->gl_mchstrt = new_state;
+	BUG_ON(!spin_is_locked(&gl->gl_lockref.lock));
+
+	do {
+		switch (gl->gl_mch) {
+		case GL_ST_IDLE:
+			next_state(gl, new_state);
+			new_state = GL_ST_IDLE;
+			break;
+
+		case GL_ST_FINISH_XMOTE:
+			next_state(gl, GL_ST_IDLE);
+			state_finish_xmote(gl);
+			break;
+
+		case GL_ST_DO_XMOTE:
+			next_state(gl, GL_ST_IDLE);
+			state_do_xmote(gl);
+			break;
+
+		}
+
+	} while (gl->gl_mch != GL_ST_IDLE);
+}
+
+/**
+ * state_machine - the glock state machine
+ * @gl: pointer to the glock we are transitioning
+ * @new_state: The new state we need to execute
+ *
+ * Just like __state_machine but it acquires the gl_lockref lock
+ */
+static void state_machine(struct gfs2_glock *gl, int new_state)
+__releases(&gl->gl_lockref.lock)
+__acquires(&gl->gl_lockref.lock)
+{
+	spin_lock(&gl->gl_lockref.lock);
+	__state_machine(gl, new_state);
+	spin_unlock(&gl->gl_lockref.lock);
+}
+
+/**
  * find_first_holder - find the first "holder" gh
  * @gl: the glock
  */
@@ -811,7 +816,7 @@ __acquires(&gl->gl_lockref.lock)
 		if (!(gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB)))
 			do_error(gl, 0); /* Fail queued try locks */
 	}
-	do_xmote(gl);
+	__state_machine(gl, GL_ST_DO_XMOTE);
 }
 
 void gfs2_inode_remember_delete(struct gfs2_glock *gl, u64 generation)
