@@ -87,6 +87,29 @@ struct wait_glock_queue {
 	wait_queue_entry_t wait;
 };
 
+/*
+ * next_state - transition the state machine to the next state
+ *
+ * For now, we require the state machine runs a state to completion and goes
+ * idle before it transitions to the next state. So X->idle is okay and
+ * idle->X is okay, but X->Y is illegal. We do this simply to ensure states
+ * are run to completion and nobody can transition to a new state in the
+ * middle of a running state.
+ */
+static inline void next_state(struct gfs2_glock *gl, u8 new_state)
+{
+	/* Make sure state machine ran to completion before the next state */
+	if (new_state != GL_ST_IDLE && gl->gl_mch != GL_ST_IDLE) {
+		fs_err(gl->gl_name.ln_sbd, "Illegal state change: %x->%x\n",
+		       gl->gl_mch, new_state);
+		gfs2_dump_glock(NULL, gl, true);
+		BUG();
+	}
+	if (new_state != GL_ST_IDLE)
+		gl->gl_mchhist = (gl->gl_mchhist << 4) | new_state;
+	gl->gl_mch = new_state;
+}
+
 static int glock_wake_function(wait_queue_entry_t *wait, unsigned int mode,
 			       int sync, void *key)
 {
@@ -470,19 +493,18 @@ static void gfs2_demote_wake(struct gfs2_glock *gl)
 }
 
 /**
- * finish_xmote - The lock manager has replied to one of our lock requests
+ * state_finish_xmote - The lock manager replied to one of our lock requests
  * @gl: The glock
  *
  */
 
-static void finish_xmote(struct gfs2_glock *gl)
+static noinline void state_finish_xmote(struct gfs2_glock *gl)
 {
 	struct gfs2_holder *gh;
 	int ret = gl->gl_reply;
 	unsigned mode = ret & LM_OUT_ST_MASK;
 	int rv;
 
-	spin_lock(&gl->gl_lockref.lock);
 	trace_gfs2_glock_mode_change(gl, mode);
 	gh = find_first_waiter(gl);
 
@@ -498,7 +520,6 @@ static void finish_xmote(struct gfs2_glock *gl)
 					list_move_tail(&gh->gh_list,
 						       &gl->gl_holders);
 				do_xmote(gl);
-				spin_unlock(&gl->gl_lockref.lock);
 				return;
 			}
 			/* Some error or failed "try lock" - report it */
@@ -523,7 +544,6 @@ static void finish_xmote(struct gfs2_glock *gl)
 			       gl->gl_req, mode);
 			GLOCK_BUG_ON(gl, 1);
 		}
-		spin_unlock(&gl->gl_lockref.lock);
 		return;
 	}
 
@@ -533,11 +553,57 @@ static void finish_xmote(struct gfs2_glock *gl)
 	if (mode != LM_ST_UNLOCKED) {
 		rv = do_promote(gl);
 		if (rv == 2)
-			goto out_locked;
+			return;
 	}
 out:
 	clear_bit(GLF_LOCK, &gl->gl_flags);
-out_locked:
+}
+
+/**
+ * __state_machine - the glock state machine
+ * @gl: pointer to the glock we are transitioning
+ * @new_state: The new state we need to execute
+ *
+ * This function handles state transitions for glocks.
+ * When the state_machine is called, it's given a new state that needs to be
+ * handled, but only after it becomes idle from the last call. Once called,
+ * it keeps running until the state transitions have all been resolved.
+ * The lock might be released inside some of the states, so we may need react
+ * to state changes from other calls.
+ */
+static void __state_machine(struct gfs2_glock *gl, int new_state)
+{
+	gl->gl_mchstrt = new_state;
+	BUG_ON(!spin_is_locked(&gl->gl_lockref.lock));
+
+	do {
+		switch (gl->gl_mch) {
+		case GL_ST_IDLE:
+			next_state(gl, new_state);
+			new_state = GL_ST_IDLE;
+			break;
+
+		case GL_ST_FINISH_XMOTE:
+			next_state(gl, GL_ST_IDLE);
+			state_finish_xmote(gl);
+			break;
+		}
+	} while (gl->gl_mch != GL_ST_IDLE);
+}
+
+/**
+ * state_machine - the glock state machine
+ * @gl: pointer to the glock we are transitioning
+ * @new_state: The new state we need to execute
+ *
+ * Just like __state_machine but it acquires the gl_lockref lock
+ */
+static void state_machine(struct gfs2_glock *gl, int new_state)
+__releases(&gl->gl_lockref.lock)
+__acquires(&gl->gl_lockref.lock)
+{
+	spin_lock(&gl->gl_lockref.lock);
+	__state_machine(gl, new_state);
 	spin_unlock(&gl->gl_lockref.lock);
 }
 
@@ -880,7 +946,7 @@ static void glock_work_func(struct work_struct *work)
 	unsigned int drop_refs = 1;
 
 	if (test_and_clear_bit(GLF_FINISH_XMOTE, &gl->gl_flags)) {
-		finish_xmote(gl);
+		state_machine(gl, GL_ST_FINISH_XMOTE);
 		drop_refs++;
 	}
 	spin_lock(&gl->gl_lockref.lock);
@@ -1007,6 +1073,7 @@ int gfs2_glock_get(struct gfs2_sbd *sdp, u64 number,
 	}
 
 	atomic_inc(&sdp->sd_glock_disposal);
+	next_state(gl, GL_ST_IDLE);
 	gl->gl_node.next = NULL;
 	gl->gl_flags = 0;
 	gl->gl_name = name;
@@ -1700,7 +1767,7 @@ void gfs2_glock_complete(struct gfs2_glock *gl, int ret)
 	gl->gl_reply = ret;
 
 	if (!sdp->sd_lockstruct.ls_ops->lm_lock) { /* lock_nolock */
-		finish_xmote(gl);
+		state_machine(gl, GL_ST_FINISH_XMOTE);
 		return;
 	}
 	/* lock_dlm */
@@ -2163,7 +2230,7 @@ void gfs2_dump_glock(struct seq_file *seq, struct gfs2_glock *gl, bool fsid)
 	if (!test_bit(GLF_DEMOTE, &gl->gl_flags))
 		dtime = 0;
 	gfs2_print_dbg(seq, "%sG:  s:%s n:%u/%llx f:%s d:%s/%llu a:%d "
-		       "v:%d r:%d m:%ld p:%lu\n",
+		       "v:%d r:%d m:%ld p:%lu S:%x/%x/%x\n",
 		       fs_id_buf, mode2str(gl_mode(gl)),
 		       gl->gl_name.ln_type,
 		       (unsigned long long)gl->gl_name.ln_number,
@@ -2171,7 +2238,8 @@ void gfs2_dump_glock(struct seq_file *seq, struct gfs2_glock *gl, bool fsid)
 		       mode2str(gl->gl_demote_mode), dtime,
 		       atomic_read(&gl->gl_ail_count),
 		       atomic_read(&gl->gl_revokes),
-		       (int)gl->gl_lockref.count, gl->gl_hold_time, nrpages);
+		       (int)gl->gl_lockref.count, gl->gl_hold_time, nrpages,
+		       gl->gl_mchstrt, gl->gl_mch, gl->gl_mchhist);
 
 	list_for_each_entry(gh, &gl->gl_holders, gh_list)
 		dump_holder(seq, gh, fs_id_buf);

@@ -123,6 +123,24 @@ enum {
 #define GL_GLOCK_HOLD_INCR       (long)(HZ / 20)
 #define GL_GLOCK_HOLD_DECR       (long)(HZ / 40)
 
+/*
+ * glock state machine transition table:
+ *
+ * Trigger                           Current State        Next State
+ * --------------------------------  -------------------- ---------------------
+ * do_xmote reaction to dlm          GL_ST_IDLE           GL_ST_FINISH_XMOTE
+ * do_xmote with LOCK_NOLOCK         GL_ST_IDLE           GL_ST_FINISH_XMOTE
+ * glock_work_func reply from dlm    GL_ST_IDLE           GL_ST_FINISH_XMOTE
+ *
+ * finish_xmote completed            GL_ST_FINISH_XMOTE   GL_ST_IDLE
+ *
+ */
+
+enum gl_machine_states {
+	GL_ST_IDLE = 0,		/* State machine idle; no transition needed */
+	GL_ST_FINISH_XMOTE = 1,	/* Promotion/demotion complete */
+};
+
 struct lm_lockops {
 	const char *lm_proto_name;
 	int (*lm_mount) (struct gfs2_sbd *sdp, const char *table);
