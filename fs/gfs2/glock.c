@@ -500,13 +500,13 @@ static void gfs2_demote_wake(struct gfs2_glock *gl)
 /**
  * finish_xmote - The DLM has replied to one of our lock requests
  * @gl: The glock
- * @ret: The status from the DLM
  *
  */
 
-static void finish_xmote(struct gfs2_glock *gl, unsigned int ret)
+static void finish_xmote(struct gfs2_glock *gl)
 {
 	struct gfs2_holder *gh;
+	int ret = gl->gl_req;
 	unsigned mode = ret & LM_OUT_ST_MASK;
 	int rv;
 
@@ -678,14 +678,14 @@ skip_inval:
 		if (ret == -EINVAL && gl->gl_target == LM_ST_UNLOCKED &&
 		    target == LM_ST_UNLOCKED &&
 		    test_bit(SDF_SKIP_DLM_UNLOCK, &sdp->sd_flags)) {
-			finish_xmote(gl, target);
+			finish_xmote(gl);
 			gfs2_glock_queue_work(gl, 0);
 		} else if (ret) {
 			fs_err(sdp, "lm_lock ret %d\n", ret);
 			GLOCK_BUG_ON(gl, !gfs2_withdrawn(sdp));
 		}
 	} else { /* lock_nolock */
-		finish_xmote(gl, target);
+		finish_xmote(gl);
 		gfs2_glock_queue_work(gl, 0);
 	}
 out:
@@ -896,7 +896,8 @@ static void glock_work_func(struct work_struct *work)
 	unsigned int drop_refs = 1;
 
 	if (test_and_clear_bit(GLF_REPLY_PENDING, &gl->gl_flags)) {
-		finish_xmote(gl, gl->gl_reply);
+		gl->gl_req = gl->gl_reply;
+		finish_xmote(gl);
 		drop_refs++;
 	}
 	spin_lock(&gl->gl_lockref.lock);
