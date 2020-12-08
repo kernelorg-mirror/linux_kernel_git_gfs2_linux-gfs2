@@ -57,7 +57,7 @@ struct gfs2_glock_iter {
 
 typedef void (*glock_examiner) (struct gfs2_glock * gl);
 
-static void do_xmote(struct gfs2_glock *gl);
+static void state_do_xmote(struct gfs2_glock *gl);
 
 static struct dentry *gfs2_root;
 static struct workqueue_struct *glock_workqueue;
@@ -552,7 +552,7 @@ static void state_finish_xmote(struct gfs2_glock *gl)
 					list_move_tail(&gh->gh_list, &gl->gl_holders);
 				gh = find_first_waiter(gl);
 				gl->gl_target = gh->gh_state;
-				do_xmote(gl);
+				next_state(gl, GL_ST_DO_XMOTE);
 				return;
 			}
 			/* Some error or failed "try lock" - report it */
@@ -566,13 +566,13 @@ static void state_finish_xmote(struct gfs2_glock *gl)
 		switch(state) {
 		/* Unlocked due to conversion deadlock, try again */
 		case LM_ST_UNLOCKED:
-			do_xmote(gl);
+			next_state(gl, GL_ST_DO_XMOTE);
 			break;
 		/* Conversion fails, unlock and try again */
 		case LM_ST_SHARED:
 		case LM_ST_DEFERRED:
 			gl->gl_target = LM_ST_UNLOCKED;
-			do_xmote(gl);
+			next_state(gl, GL_ST_DO_XMOTE);
 			break;
 		default: /* Everything else */
 			fs_err(gl->gl_name.ln_sbd, "wanted %u got %u\n",
@@ -631,7 +631,14 @@ static void __state_machine(struct gfs2_glock *gl, int new_state)
 			next_state(gl, GL_ST_IDLE);
 			state_finish_xmote(gl);
 			break;
+
+		case GL_ST_DO_XMOTE:
+			next_state(gl, GL_ST_IDLE);
+			state_do_xmote(gl);
+			break;
+
 		}
+
 	} while (gl->gl_mch != GL_ST_IDLE);
 }
 
@@ -652,12 +659,12 @@ __acquires(&gl->gl_lockref.lock)
 }
 
 /**
- * do_xmote - Calls the DLM to change the state of a lock
+ * state_do_xmote - Calls the DLM to change the state of a lock
  * @gl: The lock state
  *
  */
 
-static void do_xmote(struct gfs2_glock *gl)
+static void state_do_xmote(struct gfs2_glock *gl)
 __releases(&gl->gl_lockref.lock)
 __acquires(&gl->gl_lockref.lock)
 {
@@ -760,14 +767,14 @@ skip_inval:
 		if (ret == -EINVAL && gl->gl_target == LM_ST_UNLOCKED &&
 		    target == LM_ST_UNLOCKED &&
 		    test_bit(SDF_SKIP_DLM_UNLOCK, &sdp->sd_flags)) {
-			state_machine(gl, GL_ST_FINISH_XMOTE);
+			next_state(gl, GL_ST_FINISH_XMOTE);
 			gfs2_glock_queue_work(gl, 0);
 		} else if (ret) {
 			fs_err(sdp, "lm_lock ret %d\n", ret);
 			GLOCK_BUG_ON(gl, !gfs2_withdrawn(sdp));
 		}
 	} else { /* lock_nolock */
-		state_machine(gl, GL_ST_FINISH_XMOTE);
+		next_state(gl, GL_ST_FINISH_XMOTE);
 		gfs2_glock_queue_work(gl, 0);
 	}
 out:
@@ -843,7 +850,7 @@ __acquires(&gl->gl_lockref.lock)
 		if (!(gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB)))
 			do_error(gl, 0); /* Fail queued try locks */
 	}
-	do_xmote(gl);
+	__state_machine(gl, GL_ST_DO_XMOTE);
 }
 
 void gfs2_inode_remember_delete(struct gfs2_glock *gl, u64 generation)
