@@ -259,6 +259,12 @@ static int gdlm_lock(struct gfs2_glock *gl, unsigned int req_state,
 	u32 lkf;
 	char strname[GDLM_STRNAME_BYTES] = "";
 
+	set_bit(GLF_BLOCKING, &gl->gl_flags);
+	if ((req_state == LM_ST_UNLOCKED) ||
+	    (gl->gl_state == LM_ST_EXCLUSIVE) ||
+	    (flags & (LM_FLAG_TRY|LM_FLAG_TRY_1CB)))
+		clear_bit(GLF_BLOCKING, &gl->gl_flags);
+
 	req = make_mode(gl->gl_name.ln_sbd, req_state);
 	lkf = make_flags(gl, flags, req);
 	gfs2_glstats_inc(gl, GFS2_LKS_DCOUNT);
