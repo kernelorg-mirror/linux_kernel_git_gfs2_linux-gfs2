@@ -602,6 +602,36 @@ out:
 }
 
 /**
+ * state_do_promote - try to promote a glock
+ * @gl: The glock in question
+ *
+ * This state transitions to do_xmote state
+ */
+static void state_do_promote(struct gfs2_glock *gl)
+{
+	struct gfs2_holder *gh;
+	int ret;
+
+	if (test_bit(GLF_DEMOTE, &gl->gl_flags))
+		gfs2_demote_wake(gl);
+	ret = do_promote(gl);
+	if (ret == 0) {
+		clear_bit(GLF_LOCK, &gl->gl_flags);
+		smp_mb__after_atomic();
+		return;
+	}
+	if (ret == 2)
+		return;
+
+	gh = find_first_waiter(gl);
+	gl->gl_target = gh->gh_state;
+	if (!(gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB)))
+		do_error(gl, 0); /* Fail queued try locks */
+
+	next_state(gl, GL_ST_DO_XMOTE); /* next state */
+}
+
+/**
  * state_do_xmote - Calls the DLM to change the state of a lock
  * @gl: The lock state
  *
@@ -758,6 +788,10 @@ static void __state_machine(struct gfs2_glock *gl, int new_state)
 			state_do_xmote(gl);
 			break;
 
+		case GL_ST_PROMOTE:
+			next_state(gl, GL_ST_IDLE);
+			state_do_promote(gl);
+			break;
 		}
 
 	} while (gl->gl_mch != GL_ST_IDLE);
@@ -807,9 +841,6 @@ static void run_queue(struct gfs2_glock *gl, const int nonblock)
 __releases(&gl->gl_lockref.lock)
 __acquires(&gl->gl_lockref.lock)
 {
-	struct gfs2_holder *gh = NULL;
-	int ret;
-
 	if (test_and_set_bit(GLF_LOCK, &gl->gl_flags))
 		return;
 
@@ -832,23 +863,10 @@ __acquires(&gl->gl_lockref.lock)
 		set_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags);
 		GLOCK_BUG_ON(gl, gl->gl_demote_state == LM_ST_EXCLUSIVE);
 		gl->gl_target = gl->gl_demote_state;
+		__state_machine(gl, GL_ST_DO_XMOTE);
 	} else {
-		if (test_bit(GLF_DEMOTE, &gl->gl_flags))
-			gfs2_demote_wake(gl);
-		ret = do_promote(gl);
-		if (ret == 0) {
-			clear_bit(GLF_LOCK, &gl->gl_flags);
-			smp_mb__after_atomic();
-			return;
-		}
-		if (ret == 2)
-			return;
-		gh = find_first_waiter(gl);
-		gl->gl_target = gh->gh_state;
-		if (!(gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB)))
-			do_error(gl, 0); /* Fail queued try locks */
+		__state_machine(gl, GL_ST_PROMOTE);
 	}
-	__state_machine(gl, GL_ST_DO_XMOTE);
 }
 
 void gfs2_inode_remember_delete(struct gfs2_glock *gl, u64 generation)
