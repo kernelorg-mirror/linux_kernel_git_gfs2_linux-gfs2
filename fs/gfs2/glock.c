@@ -857,6 +857,10 @@ static void __state_machine(struct gfs2_glock *gl, int new_state)
 			state_run_queue(gl, true);
 			break;
 
+		case GL_ST_FINISH_TRUNCATE:
+			clear_bit(GLF_LOCK, &gl->gl_flags);
+			next_state(gl, GL_ST_RUN_Q_NONBLOCK);
+			break;
 		}
 
 	} while (gl->gl_mch != GL_ST_IDLE);
@@ -2109,10 +2113,7 @@ void gfs2_glock_finish_truncate(struct gfs2_inode *ip)
 	ret = gfs2_truncatei_resume(ip);
 	gfs2_glock_assert_withdraw(gl, ret == 0);
 
-	spin_lock(&gl->gl_lockref.lock);
-	clear_bit(GLF_LOCK, &gl->gl_flags);
-	__state_machine(gl, GL_ST_RUN_Q_NONBLOCK);
-	spin_unlock(&gl->gl_lockref.lock);
+	state_machine(gl, GL_ST_FINISH_TRUNCATE);
 }
 
 static const char *state2str(unsigned state)

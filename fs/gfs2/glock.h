@@ -132,6 +132,7 @@ enum {
  * glock_work_func business as usual GL_ST_IDLE           GL_ST_RUN_QUEUE
  * gfs2_glock_nq business as usual   GL_ST_IDLE           GL_ST_RUN_Q_NONBLOCK
  * gfs2_glock_finish_truncate        GL_ST_IDLE           GL_ST_RUN_Q_NONBLOCK
+ * gfs2_glock_finish_truncate        GL_ST_IDLE           GL_ST_FINISH_TRUNCATE
  *
  * finish_xmote completed            GL_ST_FINISH_XMOTE   GL_ST_IDLE
  * finish_xmote conversion deadlock  GL_ST_FINISH_XMOTE   GL_ST_DO_XMOTE
@@ -148,6 +149,8 @@ enum {
  * run_queue non-promote case        GL_ST_RUN_QUEUE      GL_ST_DO_XMOTE
  * run_queue demote in progress      GL_ST_RUN_QUEUE      GL_ST_PROMOTE
  * run_queue demote, requeue work    GL_ST_RUN_Q_NONBLOCK GL_ST_IDLE
+ *
+ * business as usual                 GL_ST_FINISH_TRUNCATE GL_ST_RUN_Q_NONBLOCK
  */
 
 enum gl_machine_states {
@@ -157,6 +160,7 @@ enum gl_machine_states {
 	GL_ST_PROMOTE = 3,	/* do_promote */
 	GL_ST_RUN_QUEUE = 4,	/* run_queue */
 	GL_ST_RUN_Q_NONBLOCK = 5,	/* run_queue_nonblock */
+	GL_ST_FINISH_TRUNCATE = 6,	/* finish_truncate */
 };
 
 struct lm_lockops {
