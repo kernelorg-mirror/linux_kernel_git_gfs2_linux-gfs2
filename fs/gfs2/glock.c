@@ -770,14 +770,31 @@ static inline struct gfs2_holder *find_first_holder(const struct gfs2_glock *gl)
  * @gl: The glock in question
  * @nonblock: True if we must not block in run_queue
  *
+ * returns: 1 if work was requeued
  */
-
-static noinline void state_run_queue(struct gfs2_glock *gl, const int nonblock)
+static noinline int state_run_queue(struct gfs2_glock *gl, const int nonblock)
 __releases(&gl->gl_lockref.lock)
 __acquires(&gl->gl_lockref.lock)
 {
+	unsigned long delay = 0;
+	int work_requeued = 0;
+
+	if (!nonblock && test_bit(GLF_PENDING_DEMOTE, &gl->gl_flags) &&
+	    gl_mode(gl) != LM_ST_UNLOCKED &&
+	    gl->gl_demote_mode != LM_ST_EXCLUSIVE) {
+		unsigned long holdtime, now = jiffies;
+
+		holdtime = gl->gl_tchange + gl->gl_hold_time;
+		if (time_before(now, holdtime))
+			delay = holdtime - now;
+
+		if (!delay) {
+			clear_bit(GLF_PENDING_DEMOTE, &gl->gl_flags);
+			gfs2_set_demote(gl);
+		}
+	}
 	if (test_and_set_bit(GLF_LOCK, &gl->gl_flags))
-		return;
+		goto out;
 
 	GLOCK_BUG_ON(gl, test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags));
 
@@ -786,14 +803,14 @@ __acquires(&gl->gl_lockref.lock)
 		if (find_first_holder(gl)) {
 			clear_bit(GLF_LOCK, &gl->gl_flags);
 			smp_mb__after_atomic();
-			return;
+			goto out;
 		}
 		if (nonblock) {
 			clear_bit(GLF_LOCK, &gl->gl_flags);
 			smp_mb__after_atomic();
 			gl->gl_lockref.count++;
 			__gfs2_glock_queue_work(gl, 0);
-			return;
+			goto out;
 		}
 		set_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags);
 		GLOCK_BUG_ON(gl, gl->gl_demote_mode == LM_ST_EXCLUSIVE);
@@ -801,6 +818,15 @@ __acquires(&gl->gl_lockref.lock)
 	} else {
 		next_state(gl, GL_ST_PROMOTE);
 	}
+out:
+	if (delay) {
+		/* Keep one glock reference for the work we requeue. */
+		work_requeued = 1;
+		if (gl->gl_name.ln_type != LM_TYPE_INODE)
+			delay = 0;
+		__gfs2_glock_queue_work(gl, delay);
+	}
+	return work_requeued;
 }
 
 /**
@@ -814,9 +840,13 @@ __acquires(&gl->gl_lockref.lock)
  * it keeps running until the state transitions have all been resolved.
  * The lock might be released inside some of the states, so we may need react
  * to state changes from other calls.
+ *
+ * Returns: return code from the given state
  */
-static void __state_machine(struct gfs2_glock *gl, int new_state)
+static int __state_machine(struct gfs2_glock *gl, int new_state)
 {
+	int ret = 0;
+
 	gl->gl_mchstrt = new_state;
 	BUG_ON(!spin_is_locked(&gl->gl_lockref.lock));
 
@@ -849,7 +879,7 @@ static void __state_machine(struct gfs2_glock *gl, int new_state)
 
 		case GL_ST_RUN_QUEUE:
 			next_state(gl, GL_ST_IDLE);
-			state_run_queue(gl, false);
+			ret = state_run_queue(gl, false);
 			break;
 
 		case GL_ST_RUN_Q_NONBLOCK:
@@ -859,6 +889,7 @@ static void __state_machine(struct gfs2_glock *gl, int new_state)
 		}
 
 	} while (gl->gl_mch != GL_ST_IDLE);
+	return ret;
 }
 
 /**
@@ -868,13 +899,16 @@ static void __state_machine(struct gfs2_glock *gl, int new_state)
  *
  * Just like __state_machine but it acquires the gl_lockref lock
  */
-static void state_machine(struct gfs2_glock *gl, int new_state)
+static int state_machine(struct gfs2_glock *gl, int new_state)
 __releases(&gl->gl_lockref.lock)
 __acquires(&gl->gl_lockref.lock)
 {
+	int ret;
+
 	spin_lock(&gl->gl_lockref.lock);
-	__state_machine(gl, new_state);
+	ret = __state_machine(gl, new_state);
 	spin_unlock(&gl->gl_lockref.lock);
+	return ret;
 }
 
 void gfs2_inode_remember_delete(struct gfs2_glock *gl, u64 generation)
@@ -1004,38 +1038,18 @@ out:
 
 static void glock_work_func(struct work_struct *work)
 {
-	unsigned long delay = 0;
 	struct gfs2_glock *gl = container_of(work, struct gfs2_glock, gl_work.work);
-	unsigned int drop_refs = 1;
+	int drop_refs = 1;
 
 	if (test_and_clear_bit(GLF_FINISH_XMOTE, &gl->gl_flags)) {
 		state_machine(gl, GL_ST_FINISH_XMOTE);
 		drop_refs++;
 	}
 	spin_lock(&gl->gl_lockref.lock);
-	if (test_bit(GLF_PENDING_DEMOTE, &gl->gl_flags) &&
-	    gl_mode(gl) != LM_ST_UNLOCKED &&
-	    gl->gl_demote_mode != LM_ST_EXCLUSIVE) {
-		unsigned long holdtime, now = jiffies;
-
-		holdtime = gl->gl_tchange + gl->gl_hold_time;
-		if (time_before(now, holdtime))
-			delay = holdtime - now;
-
-		if (!delay) {
-			clear_bit(GLF_PENDING_DEMOTE, &gl->gl_flags);
-			gfs2_set_demote(gl);
-		}
-	}
-	__state_machine(gl, GL_ST_RUN_QUEUE);
-	if (delay) {
-		/* Keep one glock reference for the work we requeue. */
-		drop_refs--;
-		if (gl->gl_name.ln_type != LM_TYPE_INODE)
-			delay = 0;
-		__gfs2_glock_queue_work(gl, delay);
-	}
-
+	/*
+	 * If the work was requeued, don't drop that additional reference.
+	 */
+	drop_refs -= __state_machine(gl, GL_ST_RUN_QUEUE);
 	/*
 	 * Drop the remaining glock references manually here. (Mind that
 	 * __gfs2_glock_queue_work depends on the lockref spinlock begin held
