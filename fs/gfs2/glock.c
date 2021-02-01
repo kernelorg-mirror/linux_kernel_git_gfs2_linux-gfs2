@@ -841,16 +841,28 @@ out:
  * The lock might be released inside some of the states, so we may need react
  * to state changes from other calls.
  *
- * Returns: return code from the given state
+ * Returns: 0 if glock still exists (and therefore needs its lockref unlocked.
+ *          non-zero: the glock was destroyed, so do not dereference it.
  */
 static int __state_machine(struct gfs2_glock *gl, int new_state)
 {
-	int ret = 0;
+	int drop_refs = new_state == GL_ST_RUN_QUEUE ? 1 : 0;
 
 	gl->gl_mchstrt = new_state;
 	BUG_ON(!spin_is_locked(&gl->gl_lockref.lock));
 
 	do {
+		/*
+		 * If dlm replied to our last request, we need to finish the
+		 * promote/demote before transitioning to a new state.
+		 */
+		if (gl->gl_mch == GL_ST_IDLE &&
+		    test_and_clear_bit(GLF_FINISH_XMOTE, &gl->gl_flags)) {
+			gl->gl_req = gl->gl_reply;
+			gl->gl_mch = GL_ST_FINISH_XMOTE;
+			drop_refs++;
+		}
+
 		switch (gl->gl_mch) {
 		case GL_ST_IDLE:
 			next_state(gl, new_state);
@@ -879,7 +891,7 @@ static int __state_machine(struct gfs2_glock *gl, int new_state)
 
 		case GL_ST_RUN_QUEUE:
 			next_state(gl, GL_ST_IDLE);
-			ret = state_run_queue(gl, false);
+			drop_refs -= state_run_queue(gl, false);
 			break;
 
 		case GL_ST_RUN_Q_NONBLOCK:
@@ -887,9 +899,19 @@ static int __state_machine(struct gfs2_glock *gl, int new_state)
 			state_run_queue(gl, true);
 			break;
 		}
-
 	} while (gl->gl_mch != GL_ST_IDLE);
-	return ret;
+	/*
+	 * Drop the remaining glock references manually here. (Mind that
+	 * __gfs2_glock_queue_work depends on the lockref spinlock begin held
+	 * here as well.)
+	 */
+	if (drop_refs)
+		gl->gl_lockref.count -= drop_refs;
+	if (!gl->gl_lockref.count) {
+		__gfs2_glock_put(gl);
+		return -ENOENT; /* glock deleted, so don't unlock lockref */
+	}
+	return 0;
 }
 
 /**
@@ -899,16 +921,13 @@ static int __state_machine(struct gfs2_glock *gl, int new_state)
  *
  * Just like __state_machine but it acquires the gl_lockref lock
  */
-static int state_machine(struct gfs2_glock *gl, int new_state)
+static void state_machine(struct gfs2_glock *gl, int new_state)
 __releases(&gl->gl_lockref.lock)
 __acquires(&gl->gl_lockref.lock)
 {
-	int ret;
-
 	spin_lock(&gl->gl_lockref.lock);
-	ret = __state_machine(gl, new_state);
-	spin_unlock(&gl->gl_lockref.lock);
-	return ret;
+	if (!__state_machine(gl, new_state))
+		spin_unlock(&gl->gl_lockref.lock);
 }
 
 void gfs2_inode_remember_delete(struct gfs2_glock *gl, u64 generation)
@@ -1039,28 +1058,7 @@ out:
 static void glock_work_func(struct work_struct *work)
 {
 	struct gfs2_glock *gl = container_of(work, struct gfs2_glock, gl_work.work);
-	int drop_refs = 1;
-
-	if (test_and_clear_bit(GLF_FINISH_XMOTE, &gl->gl_flags)) {
-		state_machine(gl, GL_ST_FINISH_XMOTE);
-		drop_refs++;
-	}
-	spin_lock(&gl->gl_lockref.lock);
-	/*
-	 * If the work was requeued, don't drop that additional reference.
-	 */
-	drop_refs -= __state_machine(gl, GL_ST_RUN_QUEUE);
-	/*
-	 * Drop the remaining glock references manually here. (Mind that
-	 * __gfs2_glock_queue_work depends on the lockref spinlock begin held
-	 * here as well.)
-	 */
-	gl->gl_lockref.count -= drop_refs;
-	if (!gl->gl_lockref.count) {
-		__gfs2_glock_put(gl);
-		return;
-	}
-	spin_unlock(&gl->gl_lockref.lock);
+	state_machine(gl, GL_ST_RUN_QUEUE);
 }
 
 static struct gfs2_glock *find_insert_glock(struct lm_lockname *name,
