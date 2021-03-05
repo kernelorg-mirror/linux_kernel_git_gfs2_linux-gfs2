@@ -519,6 +519,59 @@ static void gfs2_demote_wake(struct gfs2_glock *gl)
 }
 
 /**
+ * state_xmote_denied - The DLM has rejected our lock request
+ * @gl: The glock
+ *
+ * This can happen due to conversion deadlock: Two locks depend upon each
+ * other, but they cross nodes, so one needs to unlock and retry.
+ */
+
+static void state_xmote_denied(struct gfs2_glock *gl)
+{
+	struct gfs2_holder *gh;
+	int ret = gl->gl_req;
+	unsigned int state = ret & LM_OUT_ST_MASK;
+
+	gh = find_first_waiter(gl);
+
+	if (gh && !test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags)) {
+		/* move to back of queue and try next entry */
+		if (ret & LM_OUT_CANCELED) {
+			if ((gh->gh_flags & LM_FLAG_PRIORITY) == 0)
+				list_move_tail(&gh->gh_list, &gl->gl_holders);
+			gh = find_first_waiter(gl);
+			gl->gl_target = gh->gh_state;
+			next_state(gl, GL_ST_DO_XMOTE);
+			return;
+		}
+		/* Some error or failed "try lock" - report it */
+		if ((ret & LM_OUT_ERROR) ||
+		    (gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB))) {
+			gl->gl_target = gl->gl_state;
+			do_error(gl, ret);
+			clear_bit(GLF_LOCK, &gl->gl_flags);
+			return;
+		}
+	}
+	switch (state) {
+		/* Unlocked due to conversion deadlock, try again */
+	case LM_ST_UNLOCKED:
+		next_state(gl, GL_ST_DO_XMOTE);
+		break;
+		/* Conversion fails, unlock and try again */
+	case LM_ST_SHARED:
+	case LM_ST_DEFERRED:
+		gl->gl_target = LM_ST_UNLOCKED;
+		next_state(gl, GL_ST_DO_XMOTE);
+		break;
+	default: /* Everything else */
+		fs_err(gl->gl_name.ln_sbd, "wanted %u got %u\n",
+		       gl->gl_target, state);
+		GLOCK_BUG_ON(gl, 1);
+	}
+}
+
+/**
  * state_finish_xmote - The DLM has replied to one of our lock requests
  * @gl: The glock
  *
@@ -527,14 +580,11 @@ static void gfs2_demote_wake(struct gfs2_glock *gl)
 static void state_finish_xmote(struct gfs2_glock *gl)
 {
 	const struct gfs2_glock_operations *glops = gl->gl_ops;
-	struct gfs2_holder *gh;
-	int ret = gl->gl_req;
-	unsigned state = ret & LM_OUT_ST_MASK;
+	unsigned int state = gl->gl_req & LM_OUT_ST_MASK;
 	int rv;
 
 	trace_gfs2_glock_state_change(gl, state);
 	state_change(gl, state);
-	gh = find_first_waiter(gl);
 
 	/* Demote to UN request arrived during demote to SH or DF */
 	if (test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags) &&
@@ -543,40 +593,7 @@ static void state_finish_xmote(struct gfs2_glock *gl)
 
 	/* Check for state != intended state */
 	if (unlikely(state != gl->gl_target)) {
-		if (gh && !test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags)) {
-			/* move to back of queue and try next entry */
-			if (ret & LM_OUT_CANCELED) {
-				if ((gh->gh_flags & LM_FLAG_PRIORITY) == 0)
-					list_move_tail(&gh->gh_list, &gl->gl_holders);
-				gh = find_first_waiter(gl);
-				gl->gl_target = gh->gh_state;
-				next_state(gl, GL_ST_DO_XMOTE);
-				return;
-			}
-			/* Some error or failed "try lock" - report it */
-			if ((ret & LM_OUT_ERROR) ||
-			    (gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB))) {
-				gl->gl_target = gl->gl_state;
-				do_error(gl, ret);
-				goto out;
-			}
-		}
-		switch(state) {
-		/* Unlocked due to conversion deadlock, try again */
-		case LM_ST_UNLOCKED:
-			next_state(gl, GL_ST_DO_XMOTE);
-			break;
-		/* Conversion fails, unlock and try again */
-		case LM_ST_SHARED:
-		case LM_ST_DEFERRED:
-			gl->gl_target = LM_ST_UNLOCKED;
-			next_state(gl, GL_ST_DO_XMOTE);
-			break;
-		default: /* Everything else */
-			fs_err(gl->gl_name.ln_sbd, "wanted %u got %u\n",
-			       gl->gl_target, state);
-			GLOCK_BUG_ON(gl, 1);
-		}
+		next_state(gl, GL_ST_XMOTE_DENIED);
 		return;
 	}
 
@@ -906,6 +923,11 @@ static int __state_machine(struct gfs2_glock *gl, int new_state)
 		case GL_ST_FINISH_TRUNCATE:
 			clear_bit(GLF_LOCK, &gl->gl_flags);
 			next_state(gl, GL_ST_RUN_Q_NONBLOCK);
+			break;
+
+		case GL_ST_XMOTE_DENIED:
+			next_state(gl, GL_ST_IDLE);
+			state_xmote_denied(gl);
 			break;
 		}
 		/*
