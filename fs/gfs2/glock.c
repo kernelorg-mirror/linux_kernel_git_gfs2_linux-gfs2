@@ -1666,7 +1666,12 @@ void gfs2_glock_dq(struct gfs2_holder *gh)
 		    !test_bit(GLF_DEMOTE, &gl->gl_flags) &&
 		    gl->gl_name.ln_type == LM_TYPE_INODE)
 			delay = gl->gl_hold_time;
-		__gfs2_glock_queue_work(gl, delay);
+		if (delay)
+			__gfs2_glock_queue_work(gl, delay);
+		else {
+			if (__state_machine(gl, GL_ST_RUN_QUEUE))
+				return;
+		}
 	}
 	spin_unlock(&gl->gl_lockref.lock);
 }
@@ -1903,6 +1908,15 @@ void gfs2_glock_complete(struct gfs2_glock *gl, int ret)
 
 	gl->gl_lockref.count++;
 	set_bit(GLF_REPLY_PENDING, &gl->gl_flags);
+	/*
+	 * Note that we cannot call the glock __state_machine here because dlm
+	 * calls this directly and can therefore call gdlm_put_lock if done on
+	 * the last reference. That causes it to call back into dlm_unlock
+	 * which can deadlock because the dlm_recoverd thread can hang on
+	 * flush_workqueue while the workqueue doing the dlm_unlock cannot
+	 * proceed because the lockspace is in recovery. Or, to put it more
+	 * simply, we have: dlm -> gfs2 -> dlm
+	 */
 	__gfs2_glock_queue_work(gl, 0);
 	spin_unlock(&gl->gl_lockref.lock);
 }
