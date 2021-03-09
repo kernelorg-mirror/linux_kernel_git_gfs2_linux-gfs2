@@ -2132,8 +2132,8 @@ static void clear_glock(struct gfs2_glock *gl)
 	spin_lock(&gl->gl_lockref.lock);
 	if (gl->gl_state != LM_ST_UNLOCKED)
 		request_unlock(gl);
-	__gfs2_glock_queue_work(gl, 0);
-	spin_unlock(&gl->gl_lockref.lock);
+	if (!__state_machine(gl, GL_ST_RUN_QUEUE))
+		spin_unlock(&gl->gl_lockref.lock);
 }
 
 /**
