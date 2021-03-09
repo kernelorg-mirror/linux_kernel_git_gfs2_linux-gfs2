@@ -1962,9 +1962,11 @@ add_back_to_lru:
 		if (demote_ok(gl))
 			request_unlock(gl);
 		WARN_ON(!test_and_clear_bit(GLF_LOCK, &gl->gl_flags));
-		__gfs2_glock_queue_work(gl, 0);
-		spin_unlock(&gl->gl_lockref.lock);
-		cond_resched_lock(&lru_lock);
+		spin_unlock(&lru_lock);
+		if (!__state_machine(gl, GL_ST_RUN_QUEUE))
+			spin_unlock(&gl->gl_lockref.lock);
+		cond_resched();
+		spin_lock(&lru_lock);
 	}
 }
 
