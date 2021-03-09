@@ -1395,6 +1395,20 @@ wait_for_dlm:
 	return ret;
 }
 
+/*
+ * set_demote_mode - helper for the demote request functions
+ */
+static void set_demote_mode(struct gfs2_glock *gl, unsigned int mode)
+{
+	if (gl->gl_demote_mode == LM_ST_EXCLUSIVE) {
+		gl->gl_demote_mode = mode;
+		gl->gl_demote_time = jiffies;
+	} else if (gl->gl_demote_mode != LM_ST_UNLOCKED &&
+		   gl->gl_demote_mode != mode) {
+		gl->gl_demote_mode = LM_ST_UNLOCKED;
+	}
+}
+
 /**
  * handle_callback - process a demote request
  * @gl: the glock
@@ -1413,16 +1427,25 @@ static void handle_callback(struct gfs2_glock *gl, unsigned int mode,
 		set_bit(GLF_PENDING_DEMOTE, &gl->gl_flags);
 	else
 		gfs2_set_demote(gl);
-	if (gl->gl_demote_mode == LM_ST_EXCLUSIVE) {
-		gl->gl_demote_mode = mode;
-		gl->gl_demote_time = jiffies;
-	} else if (gl->gl_demote_mode != LM_ST_UNLOCKED &&
-			gl->gl_demote_mode != mode) {
-		gl->gl_demote_mode = LM_ST_UNLOCKED;
-	}
+	set_demote_mode(gl, mode);
 	if (gl->gl_ops->go_callback)
 		gl->gl_ops->go_callback(gl, remote);
 	trace_gfs2_demote_rq(gl, remote);
+}
+
+/**
+ * request_unlock - sister function to handle_callback for immediate unlocks
+ * @gl: the glock
+ *
+ */
+
+static void request_unlock(struct gfs2_glock *gl)
+{
+	gfs2_set_demote(gl);
+	set_demote_mode(gl, LM_ST_UNLOCKED);
+	if (gl->gl_ops->go_callback)
+		gl->gl_ops->go_callback(gl, false);
+	trace_gfs2_demote_rq(gl, false);
 }
 
 void gfs2_print_dbg(struct seq_file *seq, const char *fmt, ...)
@@ -1603,7 +1626,7 @@ void gfs2_glock_dq(struct gfs2_holder *gh)
 			    TASK_UNINTERRUPTIBLE);
 	}
 	if (gh->gh_flags & GL_NOCACHE)
-		handle_callback(gl, LM_ST_UNLOCKED, 0, false);
+		request_unlock(gl);
 
 	list_del_init(&gh->gh_list);
 	clear_bit(HIF_HOLDER, &gh->gh_iflags);
@@ -1942,7 +1965,7 @@ add_back_to_lru:
 		}
 		gl->gl_lockref.count++;
 		if (demote_ok(gl))
-			handle_callback(gl, LM_ST_UNLOCKED, 0, false);
+			request_unlock(gl);
 		WARN_ON(!test_and_clear_bit(GLF_LOCK, &gl->gl_flags));
 		__gfs2_glock_queue_work(gl, 0);
 		spin_unlock(&gl->gl_lockref.lock);
@@ -2111,7 +2134,7 @@ static void clear_glock(struct gfs2_glock *gl)
 
 	spin_lock(&gl->gl_lockref.lock);
 	if (gl_mode(gl) != LM_ST_UNLOCKED)
-		handle_callback(gl, LM_ST_UNLOCKED, 0, false);
+		request_unlock(gl);
 	__gfs2_glock_queue_work(gl, 0);
 	spin_unlock(&gl->gl_lockref.lock);
 }
