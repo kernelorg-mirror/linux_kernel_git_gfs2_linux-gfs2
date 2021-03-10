@@ -227,6 +227,8 @@ static int demote_ok(const struct gfs2_glock *gl)
 
 
 void gfs2_glock_add_to_lru(struct gfs2_glock *gl)
+__acquires(&lru_lock)
+__releases(&lru_lock)
 {
 	if (!(gl->gl_ops->go_flags & GLOF_LRU))
 		return;
@@ -245,6 +247,8 @@ void gfs2_glock_add_to_lru(struct gfs2_glock *gl)
 }
 
 static void gfs2_glock_remove_from_lru(struct gfs2_glock *gl)
+__acquires(&lru_lock)
+__releases(&lru_lock)
 {
 	if (!(gl->gl_ops->go_flags & GLOF_LRU))
 		return;
@@ -1994,6 +1998,8 @@ add_back_to_lru:
  */
 
 static long gfs2_scan_glock_lru(int nr)
+__acquires(&lru_lock)
+__releases(&lru_lock)
 {
 	struct gfs2_glock *gl;
 	LIST_HEAD(skipped);
