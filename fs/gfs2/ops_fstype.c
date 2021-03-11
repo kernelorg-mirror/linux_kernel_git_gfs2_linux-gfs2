@@ -321,7 +321,8 @@ static int gfs2_read_sb(struct gfs2_sbd *sdp, int silent)
 	 * transactions.  This greatly simplifies allocating additional
 	 * revoke blocks.
 	 */
-	atomic_set(&sdp->sd_log_revokes_available, sdp->sd_ldptrs);
+	atomic_set(&sdp->sd_log_revokes_available, 0);
+	atomic_set(&sdp->sd_log_revoke_blks, 0);
 
 	/* Compute maximum reservation required to add a entry to a directory */
 

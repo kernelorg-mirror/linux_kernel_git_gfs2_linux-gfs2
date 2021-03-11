@@ -41,7 +41,7 @@ int __gfs2_trans_begin(struct gfs2_trans *tr, struct gfs2_sbd *sdp,
 		       unsigned int blocks, unsigned int revokes,
 		       unsigned long ip)
 {
-	unsigned int extra_revokes;
+	unsigned int revoke_blks;
 
 	if (current->journal_info) {
 		gfs2_print_trans(sdp, current->journal_info);
@@ -59,8 +59,8 @@ int __gfs2_trans_begin(struct gfs2_trans *tr, struct gfs2_sbd *sdp,
 	if (blocks) {
 		/*
 		 * The reserved blocks are either used for data or metadata.
-		 * We can have mixed data and metadata, each with its own log
-		 * descriptor block; see calc_reserved().
+		 * We can have a mix of data and metadata, each with its own
+		 * log descriptor block; see calc_reserved().
 		 */
 		tr->tr_reserved += blocks + 1 + DIV_ROUND_UP(blocks - 1, databuf_limit(sdp));
 	}
@@ -85,14 +85,14 @@ int __gfs2_trans_begin(struct gfs2_trans *tr, struct gfs2_sbd *sdp,
 	 */
 
 	down_read(&sdp->sd_log_flush_lock);
-	if (gfs2_log_try_reserve(sdp, tr, &extra_revokes))
+	if (gfs2_log_try_reserve(sdp, tr, &revoke_blks))
 		goto reserved;
 	up_read(&sdp->sd_log_flush_lock);
-	gfs2_log_reserve(sdp, tr, &extra_revokes);
+	gfs2_log_reserve(sdp, tr, &revoke_blks);
 	down_read(&sdp->sd_log_flush_lock);
 
 reserved:
-	gfs2_log_release_revokes(sdp, extra_revokes);
+	gfs2_log_add_revoke_blks(sdp, revoke_blks, tr->tr_revokes);
 	if (unlikely(!test_bit(SDF_JOURNAL_LIVE, &sdp->sd_flags))) {
 		gfs2_log_release_revokes(sdp, tr->tr_revokes);
 		up_read(&sdp->sd_log_flush_lock);

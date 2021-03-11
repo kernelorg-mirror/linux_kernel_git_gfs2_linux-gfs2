@@ -511,7 +511,7 @@ static bool __gfs2_log_try_reserve(struct gfs2_sbd *sdp, unsigned int blks,
  *
  * @taboo_blks is set to 0 for logd, and to GFS2_LOG_FLUSH_MIN_BLOCKS
  * for all other processes.  This ensures that when the log is almost full,
- * logd will still be able to call gfs2_log_flush one more time  without
+ * logd will still be able to call gfs2_log_flush one more time without
  * blocking, which will advance the tail and make some more log space
  * available.
  *
@@ -549,34 +549,40 @@ reserved:
 		wake_up(&sdp->sd_log_waitq);
 }
 
+static unsigned int max_revoke_blks(struct gfs2_sbd *sdp, unsigned int revokes)
+{
+	if (revokes <= sdp->sd_ldptrs)
+		return 1;
+	revokes -= sdp->sd_ldptrs;
+	return 1 + DIV_ROUND_UP(revokes, sdp->sd_inptrs);
+}
+
 /**
  * gfs2_log_try_reserve - Try to make a log reservation
  * @sdp: The GFS2 superblock
  * @tr: The transaction
- * @extra_revokes: The number of additional revokes reserved (output)
+ * @revoke_blks: The number of revoke blocks reserved
  *
  * This is similar to gfs2_log_reserve, but sdp->sd_log_flush_lock must be
  * held for correct revoke accounting.
  */
 
 bool gfs2_log_try_reserve(struct gfs2_sbd *sdp, struct gfs2_trans *tr,
-			  unsigned int *extra_revokes)
+			  unsigned int *revoke_blks)
 {
 	unsigned int blks = tr->tr_reserved;
 	unsigned int revokes = tr->tr_revokes;
-	unsigned int revoke_blks = 0;
 
-	*extra_revokes = 0;
+	*revoke_blks = 0;
 	if (revokes && !__gfs2_log_try_reserve_revokes(sdp, revokes)) {
-		revoke_blks = DIV_ROUND_UP(revokes, sdp->sd_inptrs);
-		*extra_revokes = revoke_blks * sdp->sd_inptrs - revokes;
-		blks += revoke_blks;
+		*revoke_blks = max_revoke_blks(sdp, revokes);
+		blks += *revoke_blks;
 	}
 	if (!blks)
 		return true;
 	if (__gfs2_log_try_reserve(sdp, blks, GFS2_LOG_FLUSH_MIN_BLOCKS))
 		return true;
-	if (!revoke_blks)
+	if (!*revoke_blks)
 		gfs2_log_release_revokes(sdp, revokes);
 	return false;
 }
@@ -585,25 +591,41 @@ bool gfs2_log_try_reserve(struct gfs2_sbd *sdp, struct gfs2_trans *tr,
  * gfs2_log_reserve - Make a log reservation
  * @sdp: The GFS2 superblock
  * @tr: The transaction
- * @extra_revokes: The number of additional revokes reserved (output)
+ * @revoke_blks: The number of revoke blocks reserved
  *
  * sdp->sd_log_flush_lock must not be held.
  */
 
 void gfs2_log_reserve(struct gfs2_sbd *sdp, struct gfs2_trans *tr,
-		      unsigned int *extra_revokes)
+		      unsigned int *revoke_blks)
 {
 	unsigned int blks = tr->tr_reserved;
 	unsigned int revokes = tr->tr_revokes;
-	unsigned int revoke_blks = 0;
 
-	*extra_revokes = 0;
+	*revoke_blks = 0;
 	if (revokes) {
-		revoke_blks = DIV_ROUND_UP(revokes, sdp->sd_inptrs);
-		*extra_revokes = revoke_blks * sdp->sd_inptrs - revokes;
-		blks += revoke_blks;
+		*revoke_blks = max_revoke_blks(sdp, revokes);
+		blks += *revoke_blks;
 	}
 	__gfs2_log_reserve(sdp, blks, GFS2_LOG_FLUSH_MIN_BLOCKS);
+}
+
+void gfs2_log_add_revoke_blks(struct gfs2_sbd *sdp, unsigned int revoke_blks,
+			      unsigned int reserved_revokes)
+{
+	unsigned int revokes = 0;
+
+	if (!revoke_blks)
+		return;
+
+	if (atomic_add_return(revoke_blks,
+			      &sdp->sd_log_revoke_blks) == revoke_blks) {
+		revokes += sdp->sd_ldptrs;
+		revoke_blks--;
+	}
+	revokes += revoke_blks * sdp->sd_inptrs;
+	revokes -= reserved_revokes;
+	atomic_add(revokes, &sdp->sd_log_revokes_available);
 }
 
 /**
@@ -1129,12 +1151,18 @@ repeat:
 	}
 
 out_end:
+	/*
+	 * sd_log_revokes_available and sd_log_revoke_blks are accessed
+	 * atomically under down_read(sd_log_flush_lock), and non-atomically
+	 * under down_write(sd_log_flush_lock).
+	 */
 	used_blocks = log_distance(sdp, sdp->sd_log_flush_head, first_log_head);
 	reserved_revokes += atomic_read(&sdp->sd_log_revokes_available);
-	atomic_set(&sdp->sd_log_revokes_available, sdp->sd_ldptrs);
-	gfs2_assert_withdraw(sdp, reserved_revokes % sdp->sd_inptrs == sdp->sd_ldptrs);
-	if (reserved_revokes > sdp->sd_ldptrs)
-		reserved_blocks += (reserved_revokes - sdp->sd_ldptrs) / sdp->sd_inptrs;
+	gfs2_assert_withdraw(sdp, reserved_revokes == 0 ||
+				  reserved_revokes % sdp->sd_inptrs == sdp->sd_ldptrs);
+	atomic_set(&sdp->sd_log_revokes_available, 0);
+	reserved_blocks += atomic_read(&sdp->sd_log_revoke_blks);
+	atomic_set(&sdp->sd_log_revoke_blks, 0);
 out:
 	if (used_blocks != reserved_blocks) {
 		gfs2_assert_withdraw_delayed(sdp, used_blocks < reserved_blocks);

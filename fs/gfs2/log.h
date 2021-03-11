@@ -15,10 +15,10 @@
 
 /*
  * The minimum amount of log space required for a log flush is one block for
- * revokes and one block for the log header.  Log flushes other than
- * GFS2_LOG_HEAD_FLUSH_NORMAL may write one or two more log headers.
+ * the log header.  Log flushes other than GFS2_LOG_HEAD_FLUSH_NORMAL may write
+ * one or two more log headers.
  */
-#define GFS2_LOG_FLUSH_MIN_BLOCKS 4
+#define GFS2_LOG_FLUSH_MIN_BLOCKS 3
 
 /**
  * gfs2_log_lock - acquire the right to mess with the log manager
@@ -80,6 +80,9 @@ extern bool gfs2_log_try_reserve(struct gfs2_sbd *sdp, struct gfs2_trans *tr,
 				 unsigned int *extra_revokes);
 extern void gfs2_log_reserve(struct gfs2_sbd *sdp, struct gfs2_trans *tr,
 			     unsigned int *extra_revokes);
+extern void gfs2_log_add_revoke_blks(struct gfs2_sbd *sdp,
+				     unsigned int revoke_blks,
+				     unsigned int reserved_revokes);
 extern void gfs2_write_log_header(struct gfs2_sbd *sdp, struct gfs2_jdesc *jd,
 				  u64 seq, u32 tail, u32 lblock, u32 flags,
 				  int op_flags);
