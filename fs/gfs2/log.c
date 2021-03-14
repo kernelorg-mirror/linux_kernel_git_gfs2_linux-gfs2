@@ -300,26 +300,8 @@ static bool gfs2_ail1_empty_one(struct gfs2_sbd *sdp, struct gfs2_trans *tr,
 {
 	struct gfs2_bufdata *bd, *s;
 	struct buffer_head *bh;
-	bool empty;
+	LIST_HEAD(revoke);
 
-	if (!sdp->sd_log_error) {
-		empty = true;
-		list_for_each_entry_reverse(bd, &tr->tr_ail1_list, bd_ail_st_list) {
-			bh = bd->bd_bh;
-
-			if (buffer_busy(bh) || !list_empty(&bd->bd_list)) {
-				empty = false;
-				break;
-			}
-		}
-		if (empty) {
-			gfs2_ail_empty_tr(sdp, tr, &tr->tr_ail1_list);
-			gfs2_ail_empty_tr(sdp, tr, &tr->tr_ail2_list);
-			return empty;
-		}
-	}
-
-	empty = true;
 	list_for_each_entry_safe_reverse(bd, s, &tr->tr_ail1_list,
 					 bd_ail_st_list) {
 		bh = bd->bd_bh;
@@ -333,29 +315,38 @@ static bool gfs2_ail1_empty_one(struct gfs2_sbd *sdp, struct gfs2_trans *tr,
 		 * If the ail buffer is not busy and caught an error, flag it
 		 * for others.
 		 */
-		if (!sdp->sd_log_error && buffer_busy(bh)) {
-			empty = false;
+		if (!sdp->sd_log_error && buffer_busy(bh))
 			continue;
-		}
 		if (!buffer_uptodate(bh) &&
 		    !cmpxchg(&sdp->sd_log_error, 0, -EIO)) {
 			gfs2_io_error_bh(sdp, bh);
 			gfs2_withdraw_delayed(sdp);
 		}
-		/*
-		 * If we have space for revokes and the bd is no longer on any
-		 * buf list, we can just add a revoke for it immediately and
-		 * avoid having to put it on the ail2 list, where it would need
-		 * to be revoked later.
-		 */
+		list_move(&bd->bd_ail_st_list, &revoke);
+	}
+	if (list_empty(&tr->tr_ail1_list)) {
+		bool completely_empty = true;
+
+		list_for_each_entry(bd, &revoke, bd_ail_st_list) {
+			if (!list_empty(&bd->bd_list)) {
+				completely_empty = false;
+				break;
+			}
+		}
+		if (completely_empty) {
+			/* blah */
+			goto out;
+		}
+	}
+	list_for_each_entry_safe_reverse(bd, s, &revoke, bd_ail_st_list) {
 		if (*max_revokes && list_empty(&bd->bd_list)) {
 			gfs2_add_revoke(sdp, bd);
 			(*max_revokes)--;
-			continue;
 		}
-		list_move(&bd->bd_ail_st_list, &tr->tr_ail2_list);
 	}
-	return empty;
+	list_splice(&revoke, &tr->tr_ail2_list);
+out:
+	return list_empty(&tr->tr_ail1_list);
 }
 
 /**
@@ -374,9 +365,14 @@ static int gfs2_ail1_empty(struct gfs2_sbd *sdp, int max_revokes)
 
 	spin_lock(&sdp->sd_ail_lock);
 	list_for_each_entry_safe_reverse(tr, s, &sdp->sd_ail1_list, tr_list) {
-		if (gfs2_ail1_empty_one(sdp, tr, &max_revokes) && oldest_tr)
-			list_move(&tr->tr_list, &sdp->sd_ail2_list);
-		else
+		if (gfs2_ail1_empty_one(sdp, tr, &max_revokes) && oldest_tr) {
+			if (list_empty(&tr->tr_ail2_list)) {
+				list_del(&tr->tr_list);
+				gfs2_trans_free(sdp, tr);
+			} else {
+				list_move(&tr->tr_list, &sdp->sd_ail2_list);
+			}
+		} else
 			oldest_tr = 0;
 	}
 	gfs2_log_update_flush_tail(sdp);
