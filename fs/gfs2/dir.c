@@ -69,6 +69,7 @@
 #include "meta_io.h"
 #include "quota.h"
 #include "rgrp.h"
+#include "super.h"
 #include "trans.h"
 #include "bmap.h"
 #include "util.h"
@@ -1765,6 +1766,11 @@ static int dir_new_leaf(struct inode *inode, const struct qstr *name)
 		return error;
 	gfs2_trans_add_meta(ip->i_gl, bh);
 	gfs2_add_inode_blocks(&ip->i_inode, 1);
+	/*
+	 * This dinode now has a "next leaf" so we need to deallocate it the
+	 * old, slow way.
+	 */
+	ip->i_diskflags &= ~GFS2_DIF_NO_NEXT_LEAF;
 	gfs2_dinode_out(ip, bh->b_data);
 	brelse(bh);
 	return 0;
@@ -2088,17 +2094,7 @@ out:
 	return error;
 }
 
-/**
- * gfs2_dir_exhash_dealloc - free all the leaf blocks in a directory
- * @dip: the directory
- *
- * Dealloc all on-disk directory leaves to FREEMETA state
- * Change on-disk inode type to "regular file"
- *
- * Returns: errno
- */
-
-int gfs2_dir_exhash_dealloc(struct gfs2_inode *dip)
+static int __gfs2_dir_exhash_dealloc(struct gfs2_inode *dip)
 {
 	struct buffer_head *bh;
 	struct gfs2_leaf *leaf;
@@ -2143,6 +2139,156 @@ int gfs2_dir_exhash_dealloc(struct gfs2_inode *dip)
 out:
 
 	return error;
+}
+
+/**
+ * leaves_in_this_rgd - count the leaf blocks in the index with the same rgrp
+ * @rgd: the target resource group structure
+ * @lp: the in-core directory hash table
+ * @hsize: the hash table size
+ */
+static int leaves_in_this_rgd(struct gfs2_rgrpd *rgd, __be64 *lp, u32 hsize)
+{
+	int index, leaves_in_rgd = 0;
+	u64 leaf_no, prev_leaf = 0;
+
+	for (index = 0; index < hsize; index++) {
+		leaf_no = be64_to_cpu(lp[index]);
+		if (!leaf_no)
+			continue;
+		if (leaf_no == prev_leaf)
+			continue;
+		prev_leaf = leaf_no;
+		if (rgrp_contains_block(rgd, leaf_no))
+			leaves_in_rgd++;
+	}
+	return leaves_in_rgd;
+}
+
+static int dir_exhash_fast_dealloc(struct gfs2_inode *dip)
+{
+	struct gfs2_sbd *sdp = GFS2_SB(&dip->i_inode);
+	struct gfs2_rgrpd *rgd;
+	struct gfs2_holder gh;
+	struct buffer_head *dibh;
+	u32 hsize, index = 0, next_index = 0;
+	__be64 *lp;
+	u64 leaf_no, freed_leaf;
+	int ret = 0;
+	int leaf_count;
+	int freed_blocks;
+
+	hsize = BIT(dip->i_depth);
+	lp = gfs2_dir_get_hash_table(dip);
+	if (IS_ERR(lp))
+		return PTR_ERR(lp);
+	ret = gfs2_quota_hold(dip, NO_UID_QUOTA_CHANGE, NO_GID_QUOTA_CHANGE);
+	if (ret)
+		return ret;
+
+new_rgrp:
+	rgd = NULL;
+	freed_leaf = 0;
+	gfs2_holder_mark_uninitialized(&gh);
+	freed_blocks = 0;
+	while (index < hsize) {
+		leaf_no = be64_to_cpu(lp[index]);
+		if (!leaf_no)
+			goto skip_dups;
+		if (rgd) {
+			if (!rgrp_contains_block(rgd, leaf_no)) {
+				if (!next_index)
+					next_index = index;
+				goto skip_dups;
+			}
+		} else {
+			rgd = gfs2_blk2rgrpd(sdp, leaf_no, true);
+			if (!rgd) {
+				fs_err(sdp, "Error: rgrp for block 0x%llx "
+				       "not found in dir 0x%llx\n",
+				       (unsigned long long)leaf_no,
+				       (unsigned long long)dip->i_no_addr);
+				goto out_err;
+			}
+			ret = gfs2_glock_nq_init(rgd->rd_gl, LM_ST_EXCLUSIVE,
+						 LM_FLAG_NODE_SCOPE, &gh);
+			if (ret)
+				goto out_err;
+			leaf_count = leaves_in_this_rgd(rgd, lp, hsize);
+			ret = gfs2_trans_begin(sdp, RES_DINODE + RES_STATFS +
+					       RES_QUOTA + rgd->rd_length,
+					       leaf_count);
+			if (ret)
+				goto out_rg_gunlock;
+		}
+		__gfs2_free_blocks(dip, rgd, leaf_no, 1, 1);
+		freed_blocks++;
+		freed_leaf = leaf_no;
+skip_dups:
+		while (index < hsize && be64_to_cpu(lp[index]) == leaf_no) {
+			if (leaf_no == freed_leaf)
+				lp[index] = 0;
+			index++;
+		}
+	}
+	if (current->journal_info) {
+		gfs2_statfs_change(sdp, 0, freed_blocks, 0);
+		gfs2_quota_change(dip, -(s64)freed_blocks, dip->i_inode.i_uid,
+				  dip->i_inode.i_gid);
+		gfs2_add_inode_blocks(&dip->i_inode, -freed_blocks);
+		ret = gfs2_meta_inode_buffer(dip, &dibh);
+		if (ret) {
+			fs_err(sdp, "Error: Unable to read dinode 0x%llx\n",
+			       (unsigned long long)dip->i_no_addr);
+			gfs2_consist_inode(dip);
+			gfs2_trans_end(sdp);
+			gfs2_glock_dq_uninit(&gh);
+			goto out_err;
+		}
+		gfs2_trans_add_meta(dip->i_gl, dibh);
+		/*
+		 * On the last dealloc, make this a regular file in case we
+		 * crash. (We don't want to free these blocks a second time.)
+		 */
+		if (!next_index)
+			dip->i_inode.i_mode = S_IFREG;
+		gfs2_dinode_out(dip, dibh->b_data);
+		brelse(dibh);
+		gfs2_trans_end(sdp);
+out_rg_gunlock:
+		gfs2_glock_dq_uninit(&gh);
+	}
+	if (!ret && next_index) {
+		index = next_index;
+		next_index = 0;
+		goto new_rgrp;
+	}
+
+	if (index != hsize) {
+out_err:
+		gfs2_consist_inode(dip);
+		ret = -EIO;
+	}
+	gfs2_quota_unhold(dip);
+	return ret;
+}
+
+/**
+ * gfs2_dir_exhash_dealloc - free all the leaf blocks in a directory
+ * @dip: the directory
+ *
+ * Dealloc all on-disk directory leaves to FREEMETA state
+ * Change on-disk inode type to "regular file"
+ *
+ * Returns: errno
+ */
+
+int gfs2_dir_exhash_dealloc(struct gfs2_inode *dip)
+{
+	if (dip->i_diskflags & GFS2_DIF_NO_NEXT_LEAF)
+		return dir_exhash_fast_dealloc(dip);
+
+	return __gfs2_dir_exhash_dealloc(dip);
 }
 
 /**

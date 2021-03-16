@@ -700,7 +700,7 @@ static int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 		break;
 	case S_IFDIR:
 		ip->i_diskflags |= (dip->i_diskflags & GFS2_DIF_INHERIT_JDATA);
-		ip->i_diskflags |= GFS2_DIF_JDATA;
+		ip->i_diskflags |= GFS2_DIF_JDATA | GFS2_DIF_NO_NEXT_LEAF;
 		ip->i_entries = 2;
 		break;
 	}

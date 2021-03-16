@@ -258,6 +258,21 @@ enum {
 #define GFS2_DIF_SYNC			0x00000100
 #define GFS2_DIF_SYSTEM			0x00000200 /* New in gfs2 */
 #define GFS2_DIF_TOPDIR			0x00000400 /* New in gfs2 */
+/*
+ * GFS2_DIF_NO_NEXT_LEAF will be set for directory leaf blocks that do not have
+ * "next leaf block", lf_next. For EXHASH directories, when leaves have
+ * the maximum number of possible dirents, gfs2 allocates these next leaf
+ * blocks and they're chained together such that one terminating leaf points
+ * to another leaf with the same hash. We need to indicate which directories
+ * have none (as opposed to which ones have them) so that file systems created
+ * by older gfs2 kernels will not be treated as having no next leaf blocks.
+ *
+ * The reason we distinguish directories having "next leaf" versus none is
+ * to optimize performance of rmdir operations. When we have "next leaf"
+ * somewhere--anywhere--we need to read in all the leaf blocks to find it when
+ * deallocating. When we don't we can just deallocate the leaf blocks.
+ */
+#define GFS2_DIF_NO_NEXT_LEAF		0x00000800 /* No next leaf */
 #define GFS2_DIF_TRUNC_IN_PROG		0x20000000 /* New in gfs2 */
 #define GFS2_DIF_INHERIT_DIRECTIO	0x40000000 /* only in gfs1 */
 #define GFS2_DIF_INHERIT_JDATA		0x80000000
