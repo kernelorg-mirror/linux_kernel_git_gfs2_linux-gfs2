@@ -65,7 +65,7 @@ static inline u64 gfs2_rbm_to_block(const struct gfs2_rbm *rbm)
  * 3 = Used (metadata)
  */
 
-struct gfs2_extent {
+struct gfs2_rbmlen {
 	struct gfs2_rbm rbm;
 	u32 len;
 };
@@ -1675,7 +1675,7 @@ static u64 gfs2_next_unreserved_block(struct gfs2_rgrpd *rgd, u64 block,
 static int gfs2_reservation_check_and_update(struct gfs2_rbm *rbm,
 					     struct gfs2_blkreserv *rs,
 					     u32 minext,
-					     struct gfs2_extent *maxext)
+					     struct gfs2_rbmlen *maxext)
 {
 	u64 block = gfs2_rbm_to_block(rbm);
 	u32 extlen = 1;
@@ -1746,7 +1746,7 @@ static int gfs2_rbm_find(struct gfs2_rbm *rbm, u8 state, u32 *minext,
 	bool wrapped = false;
 	int ret;
 	struct gfs2_bitmap *bi;
-	struct gfs2_extent maxext = { .rbm.rgd = rbm->rgd, };
+	struct gfs2_rbmlen maxext = { .rbm.rgd = rbm->rgd, };
 
 	/*
 	 * Determine the last bitmap to search.  If we're not starting at the
