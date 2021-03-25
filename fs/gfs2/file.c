@@ -552,6 +552,7 @@ out_uninit:
 	gfs2_holder_uninit(&gh);
 	if (ret == 0) {
 		set_page_dirty(page);
+		balance_dirty_pages_ratelimited(page->mapping);
 		wait_for_stable_page(page);
 	}
 	sb_end_pagefault(inode->i_sb);
