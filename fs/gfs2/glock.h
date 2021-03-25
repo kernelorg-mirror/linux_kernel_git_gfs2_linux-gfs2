@@ -265,6 +265,8 @@ void glock_clear_object(struct gfs2_glock *gl, void *object);
 
 extern const struct lm_lockops gfs2_dlm_ops;
 
+#define HOLDER_UNITIALIZED { .gh_gl = NULL }
+
 static inline void gfs2_holder_mark_uninitialized(struct gfs2_holder *gh)
 {
 	gh->gh_gl = NULL;

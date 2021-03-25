@@ -10,6 +10,7 @@
 #include <linux/buffer_head.h>
 #include <linux/string.h>
 #include "incore.h"
+#include "glock.h"
 
 static inline void gfs2_buffer_clear(struct buffer_head *bh)
 {

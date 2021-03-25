@@ -5,6 +5,7 @@
 #include "incore.h"
 #include "iomap.h"
 #include "bmap.h"
+#include "extents.h"
 #include "glock.h"
 #include "rgrp.h"
 #include "trans.h"
@@ -103,12 +104,20 @@ static int __gfs2_unstuff_inode(struct gfs2_inode *ip, struct page *page)
 	di = (struct gfs2_dinode *)dibh->b_data;
 	gfs2_buffer_clear_tail(dibh, sizeof(struct gfs2_dinode));
 
-	if (i_size_read(&ip->i_inode)) {
-		*(__be64 *)(di + 1) = cpu_to_be64(block);
+	if (block) {
+		if (gfs2_has_extents(ip)) {
+			struct gfs2_extent_header *eh = (void *)(di + 1);
+			struct gfs2_extent *ex = (void *)(eh + 1);
+
+			eh->eh_entries = cpu_to_be16(1);
+			ex->ex_addr = cpu_to_be64(block);
+			ex->ex_len = cpu_to_be16(1);
+		} else {
+			*(__be64 *)(di + 1) = cpu_to_be64(block);
+		}
 		gfs2_add_inode_blocks(&ip->i_inode, 1);
 		di->di_blocks = cpu_to_be64(gfs2_get_inode_blocks(&ip->i_inode));
 	}
-
 	ip->i_height = 1;
 	di->di_height = cpu_to_be16(1);
 
@@ -192,10 +201,15 @@ static const struct iomap_folio_ops gfs2_iomap_folio_ops = {
 	.put_folio = gfs2_iomap_put_folio,
 };
 
+union ugly {
+	struct metapath mp;
+	struct gfs2_extent_path *path;
+};
+
 static int gfs2_iomap_begin_write(struct inode *inode, loff_t pos,
 				  loff_t length, unsigned flags,
 				  struct iomap *iomap,
-				  struct metapath *mp)
+				  union ugly *ugly)
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
@@ -240,15 +254,27 @@ static int gfs2_iomap_begin_write(struct inode *inode, loff_t pos,
 			ret = gfs2_unstuff_dinode(ip);
 			if (ret)
 				goto out_trans_end;
-			release_metapath(mp);
-			ret = __gfs2_iomap_get(inode, iomap->offset,
-					       iomap->length, flags, iomap, mp);
+			if (gfs2_has_extents(ip)) {
+				gfs2_free_ext_path(ugly->path);
+				ugly->path = NULL;
+				ret = __gfs2_extent_iomap_get(inode,
+						iomap->offset, iomap->length,
+						flags, iomap, &ugly->path);
+			} else {
+				release_metapath(&ugly->mp);
+				ret = __gfs2_iomap_get(inode,
+					       iomap->offset, iomap->length,
+					       flags, iomap, &ugly->mp);
+			}
 			if (ret)
 				goto out_trans_end;
 		}
 
 		if (iomap->type == IOMAP_HOLE) {
-			ret = __gfs2_iomap_alloc(inode, iomap, mp);
+			if (gfs2_has_extents(ip))
+				ret = __gfs2_extent_iomap_alloc(inode, iomap, ugly->path);
+			else
+				ret = __gfs2_iomap_alloc(inode, iomap, &ugly->mp);
 			if (ret) {
 				gfs2_trans_end(sdp);
 				gfs2_inplace_release(ip);
@@ -282,14 +308,22 @@ static int gfs2_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 			    struct iomap *srcmap)
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
-	struct metapath mp = { .mp_aheight = 1, };
+	union ugly ugly;
 	int ret;
 
 	if (gfs2_is_jdata(ip))
 		iomap->flags |= IOMAP_F_BUFFER_HEAD;
 
 	trace_gfs2_iomap_start(ip, pos, length, flags);
-	ret = __gfs2_iomap_get(inode, pos, length, flags, iomap, &mp);
+	if (gfs2_has_extents(ip)) {
+		ugly.path = NULL;
+		ret = __gfs2_extent_iomap_get(inode, pos, length, flags,
+					      iomap, &ugly.path);
+	} else {
+		memset(&ugly.mp, 0, sizeof(ugly.mp));
+		ugly.mp.mp_aheight = 1;
+		ret = __gfs2_iomap_get(inode, pos, length, flags, iomap, &ugly.mp);
+	}
 	if (ret)
 		goto out_unlock;
 
@@ -313,10 +347,13 @@ static int gfs2_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 		goto out_unlock;
 	}
 
-	ret = gfs2_iomap_begin_write(inode, pos, length, flags, iomap, &mp);
+	ret = gfs2_iomap_begin_write(inode, pos, length, flags, iomap, &ugly);
 
 out_unlock:
-	release_metapath(&mp);
+	if (gfs2_has_extents(ip))
+		gfs2_free_ext_path(ugly.path);
+	else
+		release_metapath(&ugly.mp);
 	trace_gfs2_iomap_end(ip, iomap, ret);
 	return ret;
 }
@@ -493,24 +530,45 @@ int gfs2_block_zero_range(struct inode *inode, loff_t from,
 int gfs2_iomap_get(struct inode *inode, loff_t pos, loff_t length,
 		   struct iomap *iomap)
 {
-	struct metapath mp = { .mp_aheight = 1, };
 	int ret;
 
-	ret = __gfs2_iomap_get(inode, pos, length, 0, iomap, &mp);
-	release_metapath(&mp);
+	if (gfs2_has_extents(GFS2_I(inode))) {
+		struct gfs2_extent_path *path = NULL;
+
+		ret = __gfs2_extent_iomap_get(inode, pos, length, 0,
+					      iomap, &path);
+		gfs2_free_ext_path(path);
+	} else {
+		struct metapath mp = { .mp_aheight = 1, };
+
+		ret = __gfs2_iomap_get(inode, pos, length, 0, iomap, &mp);
+		release_metapath(&mp);
+	}
 	return ret;
 }
 
 int gfs2_iomap_alloc(struct inode *inode, loff_t pos, loff_t length,
 		     struct iomap *iomap)
 {
-	struct metapath mp = { .mp_aheight = 1, };
 	int ret;
 
-	ret = __gfs2_iomap_get(inode, pos, length, IOMAP_WRITE, iomap, &mp);
-	if (!ret && iomap->type == IOMAP_HOLE)
-		ret = __gfs2_iomap_alloc(inode, iomap, &mp);
-	release_metapath(&mp);
+	if (gfs2_has_extents(GFS2_I(inode))) {
+		struct gfs2_extent_path *path = NULL;
+
+		ret = __gfs2_extent_iomap_get(inode, pos, length, IOMAP_WRITE,
+					      iomap, &path);
+		if (!ret && iomap->type == IOMAP_HOLE)
+			ret = __gfs2_extent_iomap_alloc(inode, iomap, path);
+		gfs2_free_ext_path(path);
+	} else {
+		struct metapath mp = { .mp_aheight = 1, };
+
+		ret = __gfs2_iomap_get(inode, pos, length, IOMAP_WRITE,
+				       iomap, &mp);
+		if (!ret && iomap->type == IOMAP_HOLE)
+			ret = __gfs2_iomap_alloc(inode, iomap, &mp);
+		release_metapath(&mp);
+	}
 	return ret;
 }
 

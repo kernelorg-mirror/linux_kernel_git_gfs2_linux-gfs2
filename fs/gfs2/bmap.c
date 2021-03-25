@@ -563,7 +563,7 @@ int __gfs2_iomap_alloc(struct inode *inode, struct iomap *iomap,
 			goto out;
 		alloced += n;
 		if (state != ALLOC_DATA || gfs2_is_jdata(ip))
-			gfs2_trans_remove_revoke(sdp, bn, n);
+			gfs2_trans_remove_revoke(sdp, bn, n); /* XXX If not jdata, we only want to remove iblks! */
 		switch (state) {
 		/* Growing height of tree */
 		case ALLOC_GROW_HEIGHT:
@@ -786,9 +786,11 @@ unlock:
 
 do_alloc:
 	if (flags & IOMAP_REPORT) {
-		if (pos >= size)
+		if (pos >= size) {
 			ret = -ENOENT;
-		else if (height == ip->i_height)
+			goto unlock;
+		}
+		if (height == ip->i_height)
 			ret = gfs2_hole_size(inode, lblock, len, mp, iomap);
 		else
 			iomap->length = size - iomap->offset;
@@ -796,7 +798,7 @@ do_alloc:
 		u64 alloc_size;
 
 		if (flags & IOMAP_DIRECT)
-			goto out;  /* (see gfs2_file_direct_write) */
+			goto hole_found;  /* (see gfs2_file_direct_write) */
 
 		len = gfs2_alloc_size(inode, mp, len);
 		alloc_size = len << inode->i_blkbits;
@@ -1179,6 +1181,9 @@ static inline bool walk_done(struct gfs2_sbd *sdp,
 	return mp->mp_list[height] >= end;
 }
 
+/* FIXME: split properly ... */
+int gfs2_extent_punch_hole(struct gfs2_inode *, u64, u64);
+
 /**
  * punch_hole - deallocate blocks in a file
  * @ip: inode to truncate
@@ -1213,6 +1218,9 @@ int punch_hole(struct gfs2_inode *ip, u64 offset, u64 length)
 	int mp_h; /* metapath buffers are read in to this height */
 	u64 prev_bnr = 0;
 	__be64 *start, *end;
+
+	if (gfs2_has_extents(ip))
+		return gfs2_extent_punch_hole(ip, offset,length);
 
 	if (offset >= maxsize) {
 		/*

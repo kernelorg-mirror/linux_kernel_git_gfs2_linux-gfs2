@@ -22,6 +22,11 @@ static inline int gfs2_is_stuffed(const struct gfs2_inode *ip)
 	return !ip->i_height;
 }
 
+static inline bool gfs2_has_extents(const struct gfs2_inode *ip)
+{
+	return ip->i_diskflags & GFS2_DIF_EXTENTS;
+}
+
 static inline int gfs2_is_jdata(const struct gfs2_inode *ip)
 {
 	return ip->i_diskflags & GFS2_DIF_JDATA;

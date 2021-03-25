@@ -701,7 +701,7 @@ static int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 	munge_mode_uid_gid(dip, inode);
 	check_and_update_goal(dip);
 	ip->i_goal = dip->i_goal;
-	ip->i_diskflags = 0;
+	ip->i_diskflags = S_ISREG(mode) ? GFS2_DIF_EXTENTS : 0;
 	ip->i_eattr = 0;
 	ip->i_height = 0;
 	ip->i_depth = 0;
