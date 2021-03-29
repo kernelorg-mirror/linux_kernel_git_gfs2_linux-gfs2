@@ -163,7 +163,19 @@ void gfs2_trans_end(struct gfs2_sbd *sdp)
 static struct gfs2_bufdata *gfs2_alloc_bufdata(struct gfs2_glock *gl,
 					       struct buffer_head *bh)
 {
+	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
 	struct gfs2_bufdata *bd;
+
+	bd = bh->b_private;
+	if (bd)
+		goto out_check_gl;
+
+	gfs2_log_unlock(sdp);
+	unlock_buffer(bh);
+	lock_page(bh->b_page);
+	bd = bh->b_private;
+	if (bd)
+		goto out_noalloc;
 
 	bd = kmem_cache_zalloc(gfs2_bufdata_cachep, GFP_NOFS | __GFP_NOFAIL);
 	bd->bd_bh = bh;
@@ -172,6 +184,12 @@ static struct gfs2_bufdata *gfs2_alloc_bufdata(struct gfs2_glock *gl,
 	INIT_LIST_HEAD(&bd->bd_ail_st_list);
 	INIT_LIST_HEAD(&bd->bd_ail_gl_list);
 	bh->b_private = bd;
+out_noalloc:
+	unlock_page(bh->b_page);
+	lock_buffer(bh);
+	gfs2_log_lock(sdp);
+out_check_gl:
+	gfs2_assert(sdp, bd->bd_gl == gl);
 	return bd;
 }
 
@@ -201,18 +219,7 @@ void gfs2_trans_add_data(struct gfs2_glock *gl, struct buffer_head *bh)
 		goto out;
 	}
 	gfs2_log_lock(sdp);
-	bd = bh->b_private;
-	if (bd == NULL) {
-		gfs2_log_unlock(sdp);
-		unlock_buffer(bh);
-		if (bh->b_private == NULL)
-			bd = gfs2_alloc_bufdata(gl, bh);
-		else
-			bd = bh->b_private;
-		lock_buffer(bh);
-		gfs2_log_lock(sdp);
-	}
-	gfs2_assert(sdp, bd->bd_gl == gl);
+	bd = gfs2_alloc_bufdata(gl, bh);
 	set_bit(TR_TOUCHED, &tr->tr_flags);
 	if (list_empty(&bd->bd_list)) {
 		set_bit(GLF_LFLUSH, &bd->bd_gl->gl_flags);
@@ -241,20 +248,7 @@ void gfs2_trans_add_meta(struct gfs2_glock *gl, struct buffer_head *bh)
 		goto out;
 	}
 	gfs2_log_lock(sdp);
-	bd = bh->b_private;
-	if (bd == NULL) {
-		gfs2_log_unlock(sdp);
-		unlock_buffer(bh);
-		lock_page(bh->b_page);
-		if (bh->b_private == NULL)
-			bd = gfs2_alloc_bufdata(gl, bh);
-		else
-			bd = bh->b_private;
-		unlock_page(bh->b_page);
-		lock_buffer(bh);
-		gfs2_log_lock(sdp);
-	}
-	gfs2_assert(sdp, bd->bd_gl == gl);
+	bd = gfs2_alloc_bufdata(gl, bh);
 	set_bit(TR_TOUCHED, &tr->tr_flags);
 	if (!list_empty(&bd->bd_list))
 		goto out_unlock;
