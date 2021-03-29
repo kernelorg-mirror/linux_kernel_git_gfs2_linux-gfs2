@@ -473,6 +473,8 @@ enum {
 	TR_ONSTACK = 3,
 };
 
+#define BD_PREALLOC_MAX 16
+
 struct gfs2_trans {
 	unsigned long tr_ip;
 
@@ -494,6 +496,7 @@ struct gfs2_trans {
 	unsigned int tr_first;
 	struct list_head tr_ail1_list;
 	struct list_head tr_ail2_list;
+	struct list_head tr_free; /* available / unused bd elements */
 };
 
 struct gfs2_journal_extent {

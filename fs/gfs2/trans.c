@@ -42,6 +42,14 @@ int __gfs2_trans_begin(struct gfs2_trans *tr, struct gfs2_sbd *sdp,
 		       unsigned long ip)
 {
 	unsigned int extra_revokes;
+	struct gfs2_bufdata *bd;
+	/*
+	 * Allocate an array from the heap here: it seems self-defeating to
+	 * kzalloc an array only to optimize our slab alloc.
+	 */
+	void *bd_array[BD_PREALLOC_MAX];
+	int ret, i;
+	unsigned int prealloc;
 
 	if (current->journal_info) {
 		gfs2_print_trans(sdp, current->journal_info);
@@ -69,6 +77,7 @@ int __gfs2_trans_begin(struct gfs2_trans *tr, struct gfs2_sbd *sdp,
 	INIT_LIST_HEAD(&tr->tr_list);
 	INIT_LIST_HEAD(&tr->tr_ail1_list);
 	INIT_LIST_HEAD(&tr->tr_ail2_list);
+	INIT_LIST_HEAD(&tr->tr_free);
 
 	if (gfs2_assert_warn(sdp, tr->tr_reserved <= sdp->sd_jdesc->jd_blocks))
 		return -EINVAL;
@@ -92,12 +101,31 @@ int __gfs2_trans_begin(struct gfs2_trans *tr, struct gfs2_sbd *sdp,
 	down_read(&sdp->sd_log_flush_lock);
 
 reserved:
+	prealloc = min(tr->tr_reserved, (unsigned int)BD_PREALLOC_MAX);
+	ret = kmem_cache_alloc_bulk(gfs2_bufdata_cachep, GFP_NOFS |
+				    __GFP_NOFAIL, prealloc, bd_array);
+	if (ret) {
+		for (i = 0; i < ret; i++) {
+			bd = bd_array[i];
+			/*
+			 * Note that all other LIST_HEADs in the bd will be
+			 * initialized by the trans_add_XXXX function.
+			 */
+			memset(bd, 0, sizeof(struct gfs2_bufdata));
+			list_add(&bd->bd_list, &tr->tr_free);
+		}
+	}
+	/*
+	 * If we can't get an array of elements, we keep the value NULL
+	 * and the elements will be allocated one-by-one as before.
+	 */
 	gfs2_log_release_revokes(sdp, extra_revokes);
 	if (unlikely(!test_bit(SDF_JOURNAL_LIVE, &sdp->sd_flags))) {
 		gfs2_log_release_revokes(sdp, tr->tr_revokes);
 		up_read(&sdp->sd_log_flush_lock);
 		gfs2_log_release(sdp, tr->tr_reserved);
 		sb_end_intwrite(sdp->sd_vfs);
+		kmem_cache_free_bulk(gfs2_bufdata_cachep, ret, bd_array);
 		return -EROFS;
 	}
 
@@ -160,9 +188,21 @@ void gfs2_trans_end(struct gfs2_sbd *sdp)
 	sb_end_intwrite(sdp->sd_vfs);
 }
 
+static void init_bd(struct gfs2_glock *gl, struct buffer_head *bh,
+		    struct gfs2_bufdata *bd)
+{
+	bd->bd_bh = bh;
+	bd->bd_gl = gl;
+	INIT_LIST_HEAD(&bd->bd_list);
+	INIT_LIST_HEAD(&bd->bd_ail_st_list);
+	INIT_LIST_HEAD(&bd->bd_ail_gl_list);
+	bh->b_private = bd;
+}
+
 static struct gfs2_bufdata *gfs2_alloc_bufdata(struct gfs2_glock *gl,
 					       struct buffer_head *bh)
 {
+	struct gfs2_trans *tr = current->journal_info;
 	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
 	struct gfs2_bufdata *bd;
 
@@ -170,6 +210,22 @@ static struct gfs2_bufdata *gfs2_alloc_bufdata(struct gfs2_glock *gl,
 	if (bd)
 		goto out_check_gl;
 
+	/*
+	 * If we have bd elements on the free list, use those first.
+	 */
+	if (!list_empty(&tr->tr_free)) {
+		bd = list_first_entry(&tr->tr_free, struct gfs2_bufdata,
+				      bd_list);
+		list_del(&bd->bd_list);
+		init_bd(gl, bh, bd);
+		goto out;
+	}
+	/*
+	 * At this point, we have no more free bd elements queued to the
+	 * transaction. This is unlikely because we should have created
+	 * enough with the transaction. Even so, we must now unlock our
+	 * log lock and buffer_head, and allocate a new one from slab.
+	 */
 	gfs2_log_unlock(sdp);
 	unlock_buffer(bh);
 	lock_page(bh->b_page);
@@ -178,18 +234,14 @@ static struct gfs2_bufdata *gfs2_alloc_bufdata(struct gfs2_glock *gl,
 		goto out_noalloc;
 
 	bd = kmem_cache_zalloc(gfs2_bufdata_cachep, GFP_NOFS | __GFP_NOFAIL);
-	bd->bd_bh = bh;
-	bd->bd_gl = gl;
-	INIT_LIST_HEAD(&bd->bd_list);
-	INIT_LIST_HEAD(&bd->bd_ail_st_list);
-	INIT_LIST_HEAD(&bd->bd_ail_gl_list);
-	bh->b_private = bd;
+	init_bd(gl, bh, bd);
 out_noalloc:
 	unlock_page(bh->b_page);
 	lock_buffer(bh);
 	gfs2_log_lock(sdp);
 out_check_gl:
 	gfs2_assert(sdp, bd->bd_gl == gl);
+out:
 	return bd;
 }
 
@@ -321,5 +373,13 @@ void gfs2_trans_free(struct gfs2_sbd *sdp, struct gfs2_trans *tr)
 	gfs2_assert_warn(sdp, list_empty(&tr->tr_ail2_list));
 	gfs2_assert_warn(sdp, list_empty(&tr->tr_databuf));
 	gfs2_assert_warn(sdp, list_empty(&tr->tr_buf));
+	while (!list_empty(&tr->tr_free)) {
+		struct gfs2_bufdata *bd;
+
+		bd = list_first_entry(&tr->tr_free, struct gfs2_bufdata,
+				      bd_list);
+		list_del(&bd->bd_list);
+		kmem_cache_free(gfs2_bufdata_cachep, bd);
+	}
 	kmem_cache_free(gfs2_trans_cachep, tr);
 }
