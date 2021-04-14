@@ -378,11 +378,6 @@ out:
 	return error;
 }
 
-struct lfcc {
-	struct list_head list;
-	struct gfs2_holder gh;
-};
-
 /**
  * gfs2_lock_fs_check_clean - Stop all writes to the FS and check that all
  *                            journals are clean
@@ -395,24 +390,13 @@ static int gfs2_lock_fs_check_clean(struct gfs2_sbd *sdp)
 {
 	struct gfs2_inode *ip;
 	struct gfs2_jdesc *jd;
-	struct lfcc *lfcc;
-	LIST_HEAD(list);
 	struct gfs2_log_header_host lh;
 	int error;
 
 	list_for_each_entry(jd, &sdp->sd_jindex_list, jd_list) {
-		lfcc = kmalloc(sizeof(struct lfcc), GFP_KERNEL);
-		if (!lfcc) {
-			error = -ENOMEM;
-			goto out;
-		}
 		ip = GFS2_I(jd->jd_inode);
-		error = gfs2_glock_nq_init(ip->i_gl, LM_ST_SHARED, 0, &lfcc->gh);
-		if (error) {
-			kfree(lfcc);
-			goto out;
-		}
-		list_add(&lfcc->list, &list);
+		error = gfs2_glock_nq_init(ip->i_gl, LM_ST_SHARED, 0,
+					   &jd->jd_gh);
 	}
 
 	error = gfs2_glock_nq_init(sdp->sd_freeze_gl, LM_ST_EXCLUSIVE,
@@ -437,12 +421,8 @@ static int gfs2_lock_fs_check_clean(struct gfs2_sbd *sdp)
 		gfs2_freeze_unlock(&sdp->sd_freeze_gh);
 
 out:
-	while (!list_empty(&list)) {
-		lfcc = list_first_entry(&list, struct lfcc, list);
-		list_del(&lfcc->list);
-		gfs2_glock_dq_uninit(&lfcc->gh);
-		kfree(lfcc);
-	}
+	list_for_each_entry(jd, &sdp->sd_jindex_list, jd_list)
+		gfs2_glock_dq_uninit(&jd->jd_gh);
 	return error;
 }
 

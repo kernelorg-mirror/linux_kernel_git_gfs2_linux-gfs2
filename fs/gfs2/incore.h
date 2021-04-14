@@ -504,6 +504,7 @@ struct gfs2_journal_extent {
 };
 
 struct gfs2_jdesc {
+	struct gfs2_holder jd_gh;
 	struct list_head jd_list;
 	struct list_head extent_list;
 	unsigned int nr_extents;
