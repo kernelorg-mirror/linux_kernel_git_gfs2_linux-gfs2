@@ -318,6 +318,7 @@ static int inode_go_sync(struct gfs2_glock *gl)
 		filemap_fdatawrite(mapping);
 		error = filemap_fdatawait(mapping);
 		mapping_set_error(mapping, error);
+		gfs2_ordered_del_inode(ip);
 	}
 	ret = gfs2_inode_metasync(gl);
 	if (!error)
