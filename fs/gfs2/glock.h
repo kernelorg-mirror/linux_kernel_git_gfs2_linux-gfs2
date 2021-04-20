@@ -129,23 +129,23 @@ enum {
  * Trigger                           Current State        Next State
  * --------------------------------  -------------------- ---------------------
  * glock_work_func reply from dlm    GL_ST_IDLE           GL_ST_FINISH_XMOTE
- * run_queue non-promote case        GL_ST_IDLE           GL_ST_DO_XMOTE
+ * run_queue non-promote case        GL_ST_IDLE           GL_ST_DEMOTE
  *
  * finish_xmote completed            GL_ST_FINISH_XMOTE   GL_ST_IDLE
- * finish_xmote conversion deadlock  GL_ST_FINISH_XMOTE   GL_ST_DO_XMOTE
+ * finish_xmote conversion deadlock  GL_ST_FINISH_XMOTE   GL_ST_DEMOTE
  *
- * do_xmote reaction to dlm          GL_ST_DO_XMOTE       GL_ST_FINISH_XMOTE
- * do_xmote with LOCK_NOLOCK         GL_ST_DO_XMOTE       GL_ST_FINISH_XMOTE
- * do_xmote invalidate in progress   GL_ST_DO_XMOTE       GL_ST_IDLE
- * do_xmote withdraw detected        GL_ST_DO_XMOTE       GL_ST_IDLE
- * do_xmote error during go_sync     GL_ST_DO_XMOTE       GL_ST_IDLE
+ * demote reaction to dlm            GL_ST_DEMOTE         GL_ST_FINISH_XMOTE
+ * demote with LOCK_NOLOCK           GL_ST_DEMOTE         GL_ST_FINISH_XMOTE
+ * demote invalidate in progress     GL_ST_DEMOTE         GL_ST_IDLE
+ * demote withdraw detected          GL_ST_DEMOTE         GL_ST_IDLE
+ * demote error during go_sync       GL_ST_DEMOTE         GL_ST_IDLE
  *
  */
 
 enum gl_machine_states {
 	GL_ST_IDLE = 0,		/* State machine idle; no transition needed */
 	GL_ST_FINISH_XMOTE = 1,	/* Promotion/demotion complete */
-	GL_ST_DO_XMOTE = 2,	/* do_xmote */
+	GL_ST_DEMOTE = 2,	/* Formerly do_xmote */
 };
 
 struct lm_lockops {

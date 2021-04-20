@@ -517,7 +517,7 @@ static noinline void state_finish_xmote(struct gfs2_glock *gl)
 				if ((gh->gh_flags & LM_FLAG_PRIORITY) == 0)
 					list_move_tail(&gh->gh_list,
 						       &gl->gl_holders);
-				next_state(gl, GL_ST_DO_XMOTE);
+				next_state(gl, GL_ST_DEMOTE);
 				return;
 			}
 			/* Some error or failed "try lock" - report it */
@@ -530,12 +530,12 @@ static noinline void state_finish_xmote(struct gfs2_glock *gl)
 		switch(mode) {
 		/* Unlocked due to conversion deadlock, try again */
 		case LM_ST_UNLOCKED:
-			next_state(gl, GL_ST_DO_XMOTE);
+			next_state(gl, GL_ST_DEMOTE);
 			break;
 		/* Conversion fails, unlock and try again */
 		case LM_ST_SHARED:
 		case LM_ST_DEFERRED:
-			next_state(gl, GL_ST_DO_XMOTE);
+			next_state(gl, GL_ST_DEMOTE);
 			break;
 		default: /* Everything else */
 			fs_err(gl->gl_name.ln_sbd, "requested %u got %u\n",
@@ -580,12 +580,12 @@ static inline u8 target_mode(const struct gfs2_glock *gl,
 }
 
 /**
- * do_xmote - Calls the DLM to change the mode of a lock
+ * state_demote - Calls the DLM to change the mode of a lock
  * @gl: The lock mode
  *
  */
 
-static noinline void state_do_xmote(struct gfs2_glock *gl)
+static noinline void state_demote(struct gfs2_glock *gl)
 __releases(&gl->gl_lockref.lock)
 __acquires(&gl->gl_lockref.lock)
 {
@@ -723,9 +723,9 @@ static void __state_machine(struct gfs2_glock *gl, int new_state)
 			state_finish_xmote(gl);
 			break;
 
-		case GL_ST_DO_XMOTE:
+		case GL_ST_DEMOTE:
 			next_state(gl, GL_ST_IDLE);
-			state_do_xmote(gl);
+			state_demote(gl);
 			break;
 
 		}
@@ -816,7 +816,7 @@ __acquires(&gl->gl_lockref.lock)
 		if (!(gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB)))
 			do_error(gl, 0); /* Fail queued try locks */
 	}
-	__state_machine(gl, GL_ST_DO_XMOTE);
+	__state_machine(gl, GL_ST_DEMOTE);
 }
 
 void gfs2_inode_remember_delete(struct gfs2_glock *gl, u64 generation)
