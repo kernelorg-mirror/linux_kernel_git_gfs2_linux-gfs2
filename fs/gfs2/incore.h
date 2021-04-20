@@ -315,6 +315,7 @@ struct gfs2_alloc_parms {
 
 enum {
 	GLF_LOCK			= 1,
+	GLF_LM_LOCK			= 2, /* calling lm_lock */
 	GLF_DEMOTE			= 3,
 	GLF_PENDING_DEMOTE		= 4,
 	GLF_DEMOTE_IN_PROGRESS		= 5,

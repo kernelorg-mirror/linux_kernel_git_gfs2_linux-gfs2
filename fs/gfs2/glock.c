@@ -517,7 +517,7 @@ static noinline void state_finish_xmote(struct gfs2_glock *gl)
 				if ((gh->gh_flags & LM_FLAG_PRIORITY) == 0)
 					list_move_tail(&gh->gh_list,
 						       &gl->gl_holders);
-				next_state(gl, GL_ST_DEMOTE);
+				next_state(gl, GL_ST_SYNCINVAL);
 				return;
 			}
 			/* Some error or failed "try lock" - report it */
@@ -530,12 +530,12 @@ static noinline void state_finish_xmote(struct gfs2_glock *gl)
 		switch(mode) {
 		/* Unlocked due to conversion deadlock, try again */
 		case LM_ST_UNLOCKED:
-			next_state(gl, GL_ST_DEMOTE);
+			next_state(gl, GL_ST_SYNCINVAL);
 			break;
 		/* Conversion fails, unlock and try again */
 		case LM_ST_SHARED:
 		case LM_ST_DEFERRED:
-			next_state(gl, GL_ST_DEMOTE);
+			next_state(gl, GL_ST_SYNCINVAL);
 			break;
 		default: /* Everything else */
 			fs_err(gl->gl_name.ln_sbd, "requested %u got %u\n",
@@ -580,12 +580,12 @@ static inline u8 target_mode(const struct gfs2_glock *gl,
 }
 
 /**
- * state_demote - Calls the DLM to change the mode of a lock
- * @gl: The lock mode
+ * state_syncinval - sync and/or invalidate page cache when demoting
+ * @gl: The lock state
  *
  */
 
-static noinline void state_demote(struct gfs2_glock *gl)
+static noinline void state_syncinval(struct gfs2_glock *gl)
 __releases(&gl->gl_lockref.lock)
 __acquires(&gl->gl_lockref.lock)
 {
@@ -615,6 +615,10 @@ __acquires(&gl->gl_lockref.lock)
 		do_error(gl, 0); /* Fail queued try locks */
 	}
 	gl->gl_req = target;
+	next_state(gl, GL_ST_DEMOTE);
+	if (!glops->go_sync && !glops->go_inval)
+		return;
+
 	spin_unlock(&gl->gl_lockref.lock);
 	if (glops->go_sync) {
 		ret = glops->go_sync(gl);
@@ -649,6 +653,25 @@ __acquires(&gl->gl_lockref.lock)
 	}
 
 skip_inval:
+	spin_lock(&gl->gl_lockref.lock);
+}
+
+/**
+ * state_demote - Calls the DLM to demote a lock
+ * @gl: The lock state
+ *
+ */
+ static noinline void state_demote(struct gfs2_glock *gl)
+__releases(&gl->gl_lockref.lock)
+__acquires(&gl->gl_lockref.lock)
+{
+	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
+	struct gfs2_holder *gh = find_first_waiter(gl);
+	unsigned int lck_flags = (unsigned int)(gh ? gh->gh_flags : 0);
+	int ret;
+
+	lck_flags &= (LM_FLAG_TRY | LM_FLAG_TRY_1CB | LM_FLAG_NOEXP |
+		      LM_FLAG_PRIORITY);
 	/*
 	 * Check for an error encountered since we called go_sync and go_inval.
 	 * If so, we can't withdraw from the glock code because the withdraw
@@ -665,10 +688,15 @@ skip_inval:
 	 * gfs2_gl_hash_clear calls clear_glock) and recovery is complete
 	 * then it's okay to tell dlm to unlock it.
 	 */
+	if (test_and_set_bit(GLF_LM_LOCK, &gl->gl_flags))
+		return;
+
+	next_state(gl, GL_ST_FINISH_XMOTE);
+	spin_unlock(&gl->gl_lockref.lock);
 	if (unlikely(sdp->sd_log_error && !gfs2_withdrawn(sdp)))
 		gfs2_withdraw_delayed(sdp);
 	if (glock_blocked_by_withdraw(gl)) {
-		if (target != LM_ST_UNLOCKED ||
+		if (gl->gl_req != LM_ST_UNLOCKED ||
 		    test_bit(SDF_WITHDRAW_RECOVERY, &sdp->sd_flags)) {
 			gfs2_glock_hold(gl);
 			gfs2_glock_queue_work(gl, GL_GLOCK_DFT_HOLD);
@@ -676,21 +704,22 @@ skip_inval:
 		}
 	}
 
-	if (sdp->sd_lockstruct.ls_ops->lm_lock)	{
-		gfs2_glock_hold(gl);
-		/* lock_dlm */
-		ret = sdp->sd_lockstruct.ls_ops->lm_lock(gl, target, lck_flags);
-		if (ret == -EINVAL && target == LM_ST_UNLOCKED &&
-		    test_bit(SDF_SKIP_DLM_UNLOCK, &sdp->sd_flags)) {
-			gfs2_glock_complete(gl, 0);
-		} else if (ret) {
-			fs_err(sdp, "lm_lock ret %d\n", ret);
-			GLOCK_BUG_ON(gl, !gfs2_withdrawn(sdp));
-		}
-	} else { /* lock_nolock */
-		gfs2_glock_complete(gl, target);
+	if (!sdp->sd_lockstruct.ls_ops->lm_lock) { /* lock_nolock */
+		gfs2_glock_complete(gl, gl->gl_req);
+		goto out;
+	}
+	gfs2_glock_hold(gl);
+	/* lock_dlm */
+	ret = sdp->sd_lockstruct.ls_ops->lm_lock(gl, gl->gl_req, lck_flags);
+	if (ret == -EINVAL && gl->gl_req == LM_ST_UNLOCKED &&
+	    test_bit(SDF_SKIP_DLM_UNLOCK, &sdp->sd_flags)) {
+		gfs2_glock_complete(gl, 0);
+	} else if (ret) {
+		fs_err(sdp, "lm_lock ret %d\n", ret);
+		GLOCK_BUG_ON(gl, !gfs2_withdrawn(sdp));
 	}
 out:
+	clear_bit(GLF_LM_LOCK, &gl->gl_flags);
 	spin_lock(&gl->gl_lockref.lock);
 }
 
@@ -721,6 +750,11 @@ static void __state_machine(struct gfs2_glock *gl, int new_state)
 		case GL_ST_FINISH_XMOTE:
 			next_state(gl, GL_ST_IDLE);
 			state_finish_xmote(gl);
+			break;
+
+		case GL_ST_SYNCINVAL:
+			next_state(gl, GL_ST_IDLE);
+			state_syncinval(gl);
 			break;
 
 		case GL_ST_DEMOTE:
@@ -816,7 +850,7 @@ __acquires(&gl->gl_lockref.lock)
 		if (!(gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB)))
 			do_error(gl, 0); /* Fail queued try locks */
 	}
-	__state_machine(gl, GL_ST_DEMOTE);
+	__state_machine(gl, GL_ST_SYNCINVAL);
 }
 
 void gfs2_inode_remember_delete(struct gfs2_glock *gl, u64 generation)
@@ -1771,10 +1805,9 @@ void gfs2_glock_complete(struct gfs2_glock *gl, int ret)
 	gl->gl_tchange = jiffies;
 	gl->gl_reply = ret;
 
-	if (!sdp->sd_lockstruct.ls_ops->lm_lock) { /* lock_nolock */
-		state_machine(gl, GL_ST_FINISH_XMOTE);
+	if (!sdp->sd_lockstruct.ls_ops->lm_lock) /* lock_nolock */
 		return;
-	}
+
 	/* lock_dlm */
 	if (unlikely(test_bit(DFL_BLOCK_LOCKS, &ls->ls_recover_flags))) {
 		if (gfs2_should_freeze(gl)) {
@@ -2190,6 +2223,8 @@ static const char *gflags2str(char *buf, const struct gfs2_glock *gl)
 		*p++ = 'P';
 	if (test_bit(GLF_FREEING, gflags))
 		*p++ = 'x';
+	if (test_bit(GLF_LM_LOCK, gflags))
+		*p++ = 'm';
 	*p = 0;
 	return buf;
 }
