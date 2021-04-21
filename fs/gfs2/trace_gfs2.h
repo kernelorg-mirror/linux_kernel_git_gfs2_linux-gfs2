@@ -100,7 +100,6 @@ TRACE_EVENT(gfs2_glock_mode_change,
 		__field(	u8,	cur_mode		)
 		__field(	u8,	new_mode		)
 		__field(	u8,	dmt_mode		)
-		__field(	u8,	tgt_mode		)
 		__field(	unsigned long,	flags		)
 	),
 
@@ -110,17 +109,15 @@ TRACE_EVENT(gfs2_glock_mode_change,
 		__entry->gltype		= gl->gl_name.ln_type;
 		__entry->cur_mode	= glock_trace_mode(gl->gl_mode);
 		__entry->new_mode	= glock_trace_mode(new_mode);
-		__entry->tgt_mode	= glock_trace_mode(gl->gl_target);
 		__entry->dmt_mode	= glock_trace_mode(gl->gl_demote_mode);
 		__entry->flags		= gl->gl_flags | (gl->gl_object ? (1UL<<GLF_OBJECT) : 0);
 	),
 
-	TP_printk("%u,%u glock %d:%lld mode %s to %s tgt:%s dmt:%s flags:%s",
+	TP_printk("%u,%u glock %d:%lld mode %s to %s dmt:%s flags:%s",
 		  MAJOR(__entry->dev), MINOR(__entry->dev), __entry->gltype,
 		 (unsigned long long)__entry->glnum,
 		  glock_trace_name(__entry->cur_mode),
 		  glock_trace_name(__entry->new_mode),
-		  glock_trace_name(__entry->tgt_mode),
 		  glock_trace_name(__entry->dmt_mode),
 		  show_glock_flags(__entry->flags))
 );

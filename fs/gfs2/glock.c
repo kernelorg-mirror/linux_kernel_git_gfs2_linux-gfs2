@@ -472,10 +472,6 @@ static void mode_change(struct gfs2_glock *gl, unsigned int new_mode)
 		else
 			gl->gl_lockref.count--;
 	}
-	if (new_mode != gl->gl_target)
-		/* shorten our minimum hold time */
-		gl->gl_hold_time = max(gl->gl_hold_time - GL_GLOCK_HOLD_DECR,
-				       GL_GLOCK_MIN_HOLD);
 	gl->gl_mode = new_mode;
 	gl->gl_tchange = jiffies;
 }
@@ -506,7 +502,7 @@ static void gfs2_demote_wake(struct gfs2_glock *gl)
 static void finish_xmote(struct gfs2_glock *gl)
 {
 	struct gfs2_holder *gh;
-	int ret = gl->gl_req;
+	int ret = gl->gl_reply;
 	unsigned mode = ret & LM_OUT_ST_MASK;
 	int rv;
 
@@ -515,20 +511,17 @@ static void finish_xmote(struct gfs2_glock *gl)
 	mode_change(gl, mode);
 	gh = find_first_waiter(gl);
 
-	/* Demote to UN request arrived during demote to SH or DF */
-	if (test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags) &&
-	    mode != LM_ST_UNLOCKED && gl->gl_demote_mode == LM_ST_UNLOCKED)
-		gl->gl_target = LM_ST_UNLOCKED;
-
-	/* Check for mode != intended mode */
-	if (unlikely(mode != gl->gl_target)) {
+	/* Check for dlm mode != requested mode */
+	if (unlikely(mode != gl->gl_req)) {
+		/* shorten our minimum hold time */
+		gl->gl_hold_time = max(gl->gl_hold_time - GL_GLOCK_HOLD_DECR,
+				       GL_GLOCK_MIN_HOLD);
 		if (gh && !test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags)) {
 			/* move to back of queue and try next entry */
 			if (ret & LM_OUT_CANCELED) {
 				if ((gh->gh_flags & LM_FLAG_PRIORITY) == 0)
-					list_move_tail(&gh->gh_list, &gl->gl_holders);
-				gh = find_first_waiter(gl);
-				gl->gl_target = gh->gh_mode;
+					list_move_tail(&gh->gh_list,
+						       &gl->gl_holders);
 				do_xmote(gl);
 				spin_unlock(&gl->gl_lockref.lock);
 				return;
@@ -536,7 +529,6 @@ static void finish_xmote(struct gfs2_glock *gl)
 			/* Some error or failed "try lock" - report it */
 			if ((ret & LM_OUT_ERROR) ||
 			    (gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB))) {
-				gl->gl_target = gl->gl_mode;
 				do_error(gl, ret);
 				goto out;
 			}
@@ -549,12 +541,11 @@ static void finish_xmote(struct gfs2_glock *gl)
 		/* Conversion fails, unlock and try again */
 		case LM_ST_SHARED:
 		case LM_ST_DEFERRED:
-			gl->gl_target = LM_ST_UNLOCKED;
 			do_xmote(gl);
 			break;
 		default: /* Everything else */
-			fs_err(gl->gl_name.ln_sbd, "wanted %u got %u\n",
-			       gl->gl_target, mode);
+			fs_err(gl->gl_name.ln_sbd, "requested %u got %u\n",
+			       gl->gl_req, mode);
 			GLOCK_BUG_ON(gl, 1);
 		}
 		spin_unlock(&gl->gl_lockref.lock);
@@ -576,6 +567,28 @@ out_locked:
 }
 
 /**
+ * target_mode - determine our target lock mode
+ * @gl: the glock
+ * @gh: the first waiting holder record if any, or NULL if none
+ */
+static inline u8 target_mode(const struct gfs2_glock *gl,
+			     struct gfs2_holder *gh)
+{
+	/* If we were demoting but that was prempted, unlock completely. */
+	if (test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags))
+		return LM_ST_UNLOCKED;
+
+	/* If we're demoting, return the mode we're demoting to */
+	if (test_bit(GLF_DEMOTE, &gl->gl_flags))
+		return gl->gl_demote_mode;
+
+	if (gh)
+		return gh->gh_mode;
+
+	return gl->gl_demote_mode;
+}
+
+/**
  * do_xmote - Calls the DLM to change the mode of a lock
  * @gl: The lock mode
  *
@@ -589,7 +602,7 @@ __acquires(&gl->gl_lockref.lock)
 	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
 	struct gfs2_holder *gh = find_first_waiter(gl);
 	unsigned int lck_flags = (unsigned int)(gh ? gh->gh_flags : 0);
-	int target = gl->gl_target;
+	int target = target_mode(gl, gh);
 	int ret;
 
 	if (target != LM_ST_UNLOCKED && glock_blocked_by_withdraw(gl) &&
@@ -675,8 +688,7 @@ skip_inval:
 	if (sdp->sd_lockstruct.ls_ops->lm_lock)	{
 		/* lock_dlm */
 		ret = sdp->sd_lockstruct.ls_ops->lm_lock(gl, target, lck_flags);
-		if (ret == -EINVAL && gl->gl_target == LM_ST_UNLOCKED &&
-		    target == LM_ST_UNLOCKED &&
+		if (ret == -EINVAL && target == LM_ST_UNLOCKED &&
 		    test_bit(SDF_SKIP_DLM_UNLOCK, &sdp->sd_flags)) {
 			finish_xmote(gl);
 			gfs2_glock_queue_work(gl, 0);
@@ -744,7 +756,6 @@ __acquires(&gl->gl_lockref.lock)
 		}
 		set_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags);
 		GLOCK_BUG_ON(gl, gl->gl_demote_mode == LM_ST_EXCLUSIVE);
-		gl->gl_target = gl->gl_demote_mode;
 	} else {
 		if (test_bit(GLF_DEMOTE, &gl->gl_flags))
 			gfs2_demote_wake(gl);
@@ -757,7 +768,6 @@ __acquires(&gl->gl_lockref.lock)
 		if (ret == 2)
 			return;
 		gh = find_first_waiter(gl);
-		gl->gl_target = gh->gh_mode;
 		if (!(gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB)))
 			do_error(gl, 0); /* Fail queued try locks */
 	}
@@ -896,7 +906,6 @@ static void glock_work_func(struct work_struct *work)
 	unsigned int drop_refs = 1;
 
 	if (test_and_clear_bit(GLF_REPLY_PENDING, &gl->gl_flags)) {
-		gl->gl_req = gl->gl_reply;
 		finish_xmote(gl);
 		drop_refs++;
 	}
@@ -1030,7 +1039,6 @@ int gfs2_glock_get(struct gfs2_sbd *sdp, u64 number,
 	lockdep_set_subclass(&gl->gl_lockref.lock, glops->go_subclass);
 	gl->gl_lockref.count = 1;
 	gl->gl_mode = LM_ST_UNLOCKED;
-	gl->gl_target = LM_ST_UNLOCKED;
 	gl->gl_demote_mode = LM_ST_EXCLUSIVE;
 	gl->gl_ops = glops;
 	gl->gl_dstamp = 0;
@@ -1676,7 +1684,7 @@ static int gfs2_should_freeze(const struct gfs2_glock *gl)
 
 	if (gl->gl_reply & ~LM_OUT_ST_MASK)
 		return 0;
-	if (gl->gl_target == LM_ST_UNLOCKED)
+	if ((gl->gl_reply & LM_OUT_ST_MASK) == LM_ST_UNLOCKED)
 		return 0;
 
 	list_for_each_entry(gh, &gl->gl_holders, gh_list) {
@@ -2156,13 +2164,12 @@ void gfs2_dump_glock(struct seq_file *seq, struct gfs2_glock *gl, bool fsid)
 	dtime *= 1000000/HZ; /* demote time in uSec */
 	if (!test_bit(GLF_DEMOTE, &gl->gl_flags))
 		dtime = 0;
-	gfs2_print_dbg(seq, "%sG:  s:%s n:%u/%llx f:%s t:%s d:%s/%llu a:%d "
+	gfs2_print_dbg(seq, "%sG:  s:%s n:%u/%llx f:%s d:%s/%llu a:%d "
 		       "v:%d r:%d m:%ld p:%lu\n",
 		       fs_id_buf, mode2str(gl->gl_mode),
 		       gl->gl_name.ln_type,
 		       (unsigned long long)gl->gl_name.ln_number,
 		       gflags2str(gflags_buf, gl),
-		       mode2str(gl->gl_target),
 		       mode2str(gl->gl_demote_mode), dtime,
 		       atomic_read(&gl->gl_ail_count),
 		       atomic_read(&gl->gl_revokes),

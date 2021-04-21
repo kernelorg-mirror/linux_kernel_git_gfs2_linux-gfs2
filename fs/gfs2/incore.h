@@ -339,9 +339,9 @@ struct gfs2_glock {
 
 	/* Mode fields protected by gl_lockref.lock */
 	unsigned int gl_mode:2,		/* Current mode */
-		     gl_target:2,	/* Target mode */
 		     gl_demote_mode:2,	/* Mode requested by remote node */
-		     gl_req:2,		/* Mode in last dlm request */
+		     gl_req:2,		/* Last mode requested of dlm */
+		     unused:2,
 		     gl_reply:8;	/* Last reply from the dlm */
 
 	unsigned long gl_demote_time; /* time of first demote request */
