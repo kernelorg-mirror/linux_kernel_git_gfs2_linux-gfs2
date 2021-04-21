@@ -162,17 +162,17 @@ out:
 
 static inline int gfs2_glock_is_held_excl(struct gfs2_glock *gl)
 {
-	return gl->gl_state == LM_ST_EXCLUSIVE;
+	return gl->gl_mode == LM_ST_EXCLUSIVE;
 }
 
 static inline int gfs2_glock_is_held_dfrd(struct gfs2_glock *gl)
 {
-	return gl->gl_state == LM_ST_DEFERRED;
+	return gl->gl_mode == LM_ST_DEFERRED;
 }
 
 static inline int gfs2_glock_is_held_shrd(struct gfs2_glock *gl)
 {
-	return gl->gl_state == LM_ST_SHARED;
+	return gl->gl_mode == LM_ST_SHARED;
 }
 
 static inline struct address_space *gfs2_glock2aspace(struct gfs2_glock *gl)

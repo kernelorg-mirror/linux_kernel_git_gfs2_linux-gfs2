@@ -1277,7 +1277,7 @@ static int do_flock(struct file *file, int cmd, struct file_lock *fl)
 
 	if (gfs2_holder_initialized(fl_gh)) {
 		struct file_lock request;
-		if (fl_gh->gh_state == state)
+		if (fl_gh->gh_mode == state)
 			goto out;
 		locks_init_lock(&request);
 		request.fl_type = F_UNLCK;

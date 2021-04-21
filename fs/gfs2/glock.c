@@ -195,7 +195,7 @@ static int demote_ok(const struct gfs2_glock *gl)
 {
 	const struct gfs2_glock_operations *glops = gl->gl_ops;
 
-	if (gl->gl_state == LM_ST_UNLOCKED)
+	if (gl->gl_mode == LM_ST_UNLOCKED)
 		return 0;
 	if (!list_empty(&gl->gl_holders))
 		return 0;
@@ -321,26 +321,26 @@ static inline int may_grant(const struct gfs2_glock *gl, const struct gfs2_holde
 		 * bit set. If the original holder has the LM_FLAG_NODE_SCOPE bit
 		 * is set, we grant more holders with the bit set.
 		 */
-		if (gh_head->gh_state == LM_ST_EXCLUSIVE &&
+		if (gh_head->gh_mode == LM_ST_EXCLUSIVE &&
 		    (gh_head->gh_flags & LM_FLAG_NODE_SCOPE) &&
-		    gh->gh_state == LM_ST_EXCLUSIVE &&
+		    gh->gh_mode == LM_ST_EXCLUSIVE &&
 		    (gh->gh_flags & LM_FLAG_NODE_SCOPE))
 			return 1;
-		if ((gh->gh_state == LM_ST_EXCLUSIVE ||
-		     gh_head->gh_state == LM_ST_EXCLUSIVE))
+		if ((gh->gh_mode == LM_ST_EXCLUSIVE ||
+		     gh_head->gh_mode == LM_ST_EXCLUSIVE))
 			return 0;
 	}
-	if (gl->gl_state == gh->gh_state)
+	if (gl->gl_mode == gh->gh_mode)
 		return 1;
 	if (gh->gh_flags & GL_EXACT)
 		return 0;
-	if (gl->gl_state == LM_ST_EXCLUSIVE) {
-		if (gh->gh_state == LM_ST_SHARED && gh_head->gh_state == LM_ST_SHARED)
+	if (gl->gl_mode == LM_ST_EXCLUSIVE) {
+		if (gh->gh_mode == LM_ST_SHARED && gh_head->gh_mode == LM_ST_SHARED)
 			return 1;
-		if (gh->gh_state == LM_ST_DEFERRED && gh_head->gh_state == LM_ST_DEFERRED)
+		if (gh->gh_mode == LM_ST_DEFERRED && gh_head->gh_mode == LM_ST_DEFERRED)
 			return 1;
 	}
-	if (gl->gl_state != LM_ST_UNLOCKED && (gh->gh_flags & LM_FLAG_ANY))
+	if (gl->gl_mode != LM_ST_UNLOCKED && (gh->gh_flags & LM_FLAG_ANY))
 		return 1;
 	return 0;
 }
@@ -453,17 +453,17 @@ static inline struct gfs2_holder *find_first_waiter(const struct gfs2_glock *gl)
 }
 
 /**
- * state_change - record that the glock is now in a different state
+ * mode_change - record that the glock is now in a different mode
  * @gl: the glock
- * @new_state: the new state
+ * @new_mode: the new mode
  */
 
-static void state_change(struct gfs2_glock *gl, unsigned int new_state)
+static void mode_change(struct gfs2_glock *gl, unsigned int new_mode)
 {
 	int held1, held2;
 
-	held1 = (gl->gl_state != LM_ST_UNLOCKED);
-	held2 = (new_state != LM_ST_UNLOCKED);
+	held1 = (gl->gl_mode != LM_ST_UNLOCKED);
+	held2 = (new_mode != LM_ST_UNLOCKED);
 
 	if (held1 != held2) {
 		GLOCK_BUG_ON(gl, __lockref_is_dead(&gl->gl_lockref));
@@ -472,11 +472,11 @@ static void state_change(struct gfs2_glock *gl, unsigned int new_state)
 		else
 			gl->gl_lockref.count--;
 	}
-	if (new_state != gl->gl_target)
+	if (new_mode != gl->gl_target)
 		/* shorten our minimum hold time */
 		gl->gl_hold_time = max(gl->gl_hold_time - GL_GLOCK_HOLD_DECR,
 				       GL_GLOCK_MIN_HOLD);
-	gl->gl_state = new_state;
+	gl->gl_mode = new_mode;
 	gl->gl_tchange = jiffies;
 }
 
@@ -491,7 +491,7 @@ static void gfs2_set_demote(struct gfs2_glock *gl)
 
 static void gfs2_demote_wake(struct gfs2_glock *gl)
 {
-	gl->gl_demote_state = LM_ST_EXCLUSIVE;
+	gl->gl_demote_mode = LM_ST_EXCLUSIVE;
 	clear_bit(GLF_DEMOTE, &gl->gl_flags);
 	smp_mb__after_atomic();
 	wake_up_bit(&gl->gl_flags, GLF_DEMOTE);
@@ -507,39 +507,39 @@ static void gfs2_demote_wake(struct gfs2_glock *gl)
 static void finish_xmote(struct gfs2_glock *gl, unsigned int ret)
 {
 	struct gfs2_holder *gh;
-	unsigned state = ret & LM_OUT_ST_MASK;
+	unsigned mode = ret & LM_OUT_ST_MASK;
 	int rv;
 
 	spin_lock(&gl->gl_lockref.lock);
-	trace_gfs2_glock_state_change(gl, state);
-	state_change(gl, state);
+	trace_gfs2_glock_mode_change(gl, mode);
+	mode_change(gl, mode);
 	gh = find_first_waiter(gl);
 
 	/* Demote to UN request arrived during demote to SH or DF */
 	if (test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags) &&
-	    state != LM_ST_UNLOCKED && gl->gl_demote_state == LM_ST_UNLOCKED)
+	    mode != LM_ST_UNLOCKED && gl->gl_demote_mode == LM_ST_UNLOCKED)
 		gl->gl_target = LM_ST_UNLOCKED;
 
-	/* Check for state != intended state */
-	if (unlikely(state != gl->gl_target)) {
+	/* Check for mode != intended mode */
+	if (unlikely(mode != gl->gl_target)) {
 		if (gh && !test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags)) {
 			/* move to back of queue and try next entry */
 			if (ret & LM_OUT_CANCELED) {
 				if ((gh->gh_flags & LM_FLAG_PRIORITY) == 0)
 					list_move_tail(&gh->gh_list, &gl->gl_holders);
 				gh = find_first_waiter(gl);
-				gl->gl_target = gh->gh_state;
+				gl->gl_target = gh->gh_mode;
 				goto retry;
 			}
 			/* Some error or failed "try lock" - report it */
 			if ((ret & LM_OUT_ERROR) ||
 			    (gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB))) {
-				gl->gl_target = gl->gl_state;
+				gl->gl_target = gl->gl_mode;
 				do_error(gl, ret);
 				goto out;
 			}
 		}
-		switch(state) {
+		switch(mode) {
 		/* Unlocked due to conversion deadlock, try again */
 		case LM_ST_UNLOCKED:
 retry:
@@ -552,7 +552,7 @@ retry:
 			break;
 		default: /* Everything else */
 			fs_err(gl->gl_name.ln_sbd, "wanted %u got %u\n",
-			       gl->gl_target, state);
+			       gl->gl_target, mode);
 			GLOCK_BUG_ON(gl, 1);
 		}
 		spin_unlock(&gl->gl_lockref.lock);
@@ -562,7 +562,7 @@ retry:
 	/* Fast path - we got what we asked for */
 	if (test_and_clear_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags))
 		gfs2_demote_wake(gl);
-	if (state != LM_ST_UNLOCKED) {
+	if (mode != LM_ST_UNLOCKED) {
 		rv = do_promote(gl);
 		if (rv == 2)
 			goto out_locked;
@@ -574,10 +574,10 @@ out_locked:
 }
 
 /**
- * do_xmote - Calls the DLM to change the state of a lock
- * @gl: The lock state
+ * do_xmote - Calls the DLM to change the mode of a lock
+ * @gl: The lock mode
  * @gh: The holder (only for promotes)
- * @target: The target lock state
+ * @target: The target lock mode
  *
  */
 
@@ -595,8 +595,8 @@ __acquires(&gl->gl_lockref.lock)
 		return;
 	lck_flags &= (LM_FLAG_TRY | LM_FLAG_TRY_1CB | LM_FLAG_NOEXP |
 		      LM_FLAG_PRIORITY);
-	GLOCK_BUG_ON(gl, gl->gl_state == target);
-	GLOCK_BUG_ON(gl, gl->gl_state == gl->gl_target);
+	GLOCK_BUG_ON(gl, gl->gl_mode == target);
+	GLOCK_BUG_ON(gl, gl->gl_mode == gl->gl_target);
 	if ((target == LM_ST_UNLOCKED || target == LM_ST_DEFERRED) &&
 	    glops->go_inval) {
 		/*
@@ -612,7 +612,7 @@ __acquires(&gl->gl_lockref.lock)
 	gl->gl_req = target;
 	set_bit(GLF_BLOCKING, &gl->gl_flags);
 	if ((gl->gl_req == LM_ST_UNLOCKED) ||
-	    (gl->gl_state == LM_ST_EXCLUSIVE) ||
+	    (gl->gl_mode == LM_ST_EXCLUSIVE) ||
 	    (lck_flags & (LM_FLAG_TRY|LM_FLAG_TRY_1CB)))
 		clear_bit(GLF_BLOCKING, &gl->gl_flags);
 	spin_unlock(&gl->gl_lockref.lock);
@@ -733,14 +733,14 @@ __acquires(&gl->gl_lockref.lock)
 	GLOCK_BUG_ON(gl, test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags));
 
 	if (test_bit(GLF_DEMOTE, &gl->gl_flags) &&
-	    gl->gl_demote_state != gl->gl_state) {
+	    gl->gl_demote_mode != gl->gl_mode) {
 		if (find_first_holder(gl))
 			goto out_unlock;
 		if (nonblock)
 			goto out_sched;
 		set_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags);
-		GLOCK_BUG_ON(gl, gl->gl_demote_state == LM_ST_EXCLUSIVE);
-		gl->gl_target = gl->gl_demote_state;
+		GLOCK_BUG_ON(gl, gl->gl_demote_mode == LM_ST_EXCLUSIVE);
+		gl->gl_target = gl->gl_demote_mode;
 	} else {
 		if (test_bit(GLF_DEMOTE, &gl->gl_flags))
 			gfs2_demote_wake(gl);
@@ -750,7 +750,7 @@ __acquires(&gl->gl_lockref.lock)
 		if (ret == 2)
 			goto out;
 		gh = find_first_waiter(gl);
-		gl->gl_target = gh->gh_state;
+		gl->gl_target = gh->gh_mode;
 		if (!(gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB)))
 			do_error(gl, 0); /* Fail queued try locks */
 	}
@@ -908,8 +908,8 @@ static void glock_work_func(struct work_struct *work)
 	}
 	spin_lock(&gl->gl_lockref.lock);
 	if (test_bit(GLF_PENDING_DEMOTE, &gl->gl_flags) &&
-	    gl->gl_state != LM_ST_UNLOCKED &&
-	    gl->gl_demote_state != LM_ST_EXCLUSIVE) {
+	    gl->gl_mode != LM_ST_UNLOCKED &&
+	    gl->gl_demote_mode != LM_ST_EXCLUSIVE) {
 		unsigned long holdtime, now = jiffies;
 
 		holdtime = gl->gl_tchange + gl->gl_hold_time;
@@ -1035,9 +1035,9 @@ int gfs2_glock_get(struct gfs2_sbd *sdp, u64 number,
 	gl->gl_name = name;
 	lockdep_set_subclass(&gl->gl_lockref.lock, glops->go_subclass);
 	gl->gl_lockref.count = 1;
-	gl->gl_state = LM_ST_UNLOCKED;
+	gl->gl_mode = LM_ST_UNLOCKED;
 	gl->gl_target = LM_ST_UNLOCKED;
-	gl->gl_demote_state = LM_ST_EXCLUSIVE;
+	gl->gl_demote_mode = LM_ST_EXCLUSIVE;
 	gl->gl_ops = glops;
 	gl->gl_dstamp = 0;
 	preempt_disable();
@@ -1087,20 +1087,20 @@ out:
 /**
  * gfs2_holder_init - initialize a struct gfs2_holder in the default way
  * @gl: the glock
- * @state: the state we're requesting
+ * @mode: the mode we're requesting
  * @flags: the modifier flags
  * @gh: the holder structure
  *
  */
 
-void gfs2_holder_init(struct gfs2_glock *gl, unsigned int state, u16 flags,
+void gfs2_holder_init(struct gfs2_glock *gl, unsigned int mode, u16 flags,
 		      struct gfs2_holder *gh)
 {
 	INIT_LIST_HEAD(&gh->gh_list);
 	gh->gh_gl = gl;
 	gh->gh_ip = _RET_IP_;
 	gh->gh_owner_pid = get_pid(task_pid(current));
-	gh->gh_state = state;
+	gh->gh_mode = mode;
 	gh->gh_flags = flags;
 	gh->gh_error = 0;
 	gh->gh_iflags = 0;
@@ -1109,7 +1109,7 @@ void gfs2_holder_init(struct gfs2_glock *gl, unsigned int state, u16 flags,
 
 /**
  * gfs2_holder_reinit - reinitialize a struct gfs2_holder so we can requeue it
- * @state: the state we're requesting
+ * @mode: the mode we're requesting
  * @flags: the modifier flags
  * @gh: the holder structure
  *
@@ -1117,9 +1117,9 @@ void gfs2_holder_init(struct gfs2_glock *gl, unsigned int state, u16 flags,
  *
  */
 
-void gfs2_holder_reinit(unsigned int state, u16 flags, struct gfs2_holder *gh)
+void gfs2_holder_reinit(unsigned int mode, u16 flags, struct gfs2_holder *gh)
 {
-	gh->gh_state = state;
+	gh->gh_mode = mode;
 	gh->gh_flags = flags;
 	gh->gh_iflags = 0;
 	gh->gh_ip = _RET_IP_;
@@ -1257,7 +1257,7 @@ wait_for_dlm:
 /**
  * handle_callback - process a demote request
  * @gl: the glock
- * @state: the state the caller wants us to change to
+ * @mode: the mode the caller wants us to change to
  * @delay: zero to demote immediately; otherwise pending demote
  * @remote: true if this came from a different cluster node
  *
@@ -1265,19 +1265,19 @@ wait_for_dlm:
  * practise: LM_ST_SHARED and LM_ST_UNLOCKED
  */
 
-static void handle_callback(struct gfs2_glock *gl, unsigned int state,
+static void handle_callback(struct gfs2_glock *gl, unsigned int mode,
 			    unsigned long delay, bool remote)
 {
 	if (delay)
 		set_bit(GLF_PENDING_DEMOTE, &gl->gl_flags);
 	else
 		gfs2_set_demote(gl);
-	if (gl->gl_demote_state == LM_ST_EXCLUSIVE) {
-		gl->gl_demote_state = state;
+	if (gl->gl_demote_mode == LM_ST_EXCLUSIVE) {
+		gl->gl_demote_mode = mode;
 		gl->gl_demote_time = jiffies;
-	} else if (gl->gl_demote_state != LM_ST_UNLOCKED &&
-			gl->gl_demote_state != state) {
-		gl->gl_demote_state = LM_ST_UNLOCKED;
+	} else if (gl->gl_demote_mode != LM_ST_UNLOCKED &&
+			gl->gl_demote_mode != mode) {
+		gl->gl_demote_mode = LM_ST_UNLOCKED;
 	}
 	if (gl->gl_ops->go_callback)
 		gl->gl_ops->go_callback(gl, remote);
@@ -1373,12 +1373,12 @@ do_cancel:
 trap_recursive:
 	fs_err(sdp, "original: %pSR\n", (void *)gh2->gh_ip);
 	fs_err(sdp, "pid: %d\n", pid_nr(gh2->gh_owner_pid));
-	fs_err(sdp, "lock type: %d req lock state : %d\n",
-	       gh2->gh_gl->gl_name.ln_type, gh2->gh_state);
+	fs_err(sdp, "lock type: %d req lock mode : %d\n",
+	       gh2->gh_gl->gl_name.ln_type, gh2->gh_mode);
 	fs_err(sdp, "new: %pSR\n", (void *)gh->gh_ip);
 	fs_err(sdp, "pid: %d\n", pid_nr(gh->gh_owner_pid));
-	fs_err(sdp, "lock type: %d req lock state : %d\n",
-	       gh->gh_gl->gl_name.ln_type, gh->gh_state);
+	fs_err(sdp, "lock type: %d req lock mode : %d\n",
+	       gh->gh_gl->gl_name.ln_type, gh->gh_mode);
 	gfs2_dump_glock(NULL, gl, true);
 	BUG();
 }
@@ -1512,7 +1512,7 @@ void gfs2_glock_dq_uninit(struct gfs2_holder *gh)
  * @sdp: the filesystem
  * @number: the lock number
  * @glops: the glock operations for the type of glock
- * @state: the state to acquire the glock in
+ * @mode: the mode to acquire the glock in
  * @flags: modifier flags for the acquisition
  * @gh: the struct gfs2_holder
  *
@@ -1521,14 +1521,14 @@ void gfs2_glock_dq_uninit(struct gfs2_holder *gh)
 
 int gfs2_glock_nq_num(struct gfs2_sbd *sdp, u64 number,
 		      const struct gfs2_glock_operations *glops,
-		      unsigned int state, u16 flags, struct gfs2_holder *gh)
+		      unsigned int mode, u16 flags, struct gfs2_holder *gh)
 {
 	struct gfs2_glock *gl;
 	int error;
 
 	error = gfs2_glock_get(sdp, number, glops, CREATE, &gl);
 	if (!error) {
-		error = gfs2_glock_nq_init(gl, state, flags, gh);
+		error = gfs2_glock_nq_init(gl, mode, flags, gh);
 		gfs2_glock_put(gl);
 	}
 
@@ -1644,7 +1644,7 @@ void gfs2_glock_dq_m(unsigned int num_gh, struct gfs2_holder *ghs)
 		gfs2_glock_dq(&ghs[num_gh]);
 }
 
-void gfs2_glock_cb(struct gfs2_glock *gl, unsigned int state)
+void gfs2_glock_cb(struct gfs2_glock *gl, unsigned int mode)
 {
 	unsigned long delay = 0;
 	unsigned long holdtime;
@@ -1660,7 +1660,7 @@ void gfs2_glock_cb(struct gfs2_glock *gl, unsigned int state)
 		if (test_bit(GLF_REPLY_PENDING, &gl->gl_flags))
 			delay = gl->gl_hold_time;
 	}
-	handle_callback(gl, state, delay, true);
+	handle_callback(gl, mode, delay, true);
 	__gfs2_glock_queue_work(gl, delay);
 	spin_unlock(&gl->gl_lockref.lock);
 }
@@ -1701,7 +1701,7 @@ static int gfs2_should_freeze(const struct gfs2_glock *gl)
  * @ret: The return value from the dlm
  *
  * The gl_reply field is under the gl_lockref.lock lock so that it is ok
- * to use a bitfield shared with other glock state fields.
+ * to use a bitfield shared with other glock mode fields.
  */
 
 void gfs2_glock_complete(struct gfs2_glock *gl, int ret)
@@ -1946,7 +1946,7 @@ static void clear_glock(struct gfs2_glock *gl)
 	gfs2_glock_remove_from_lru(gl);
 
 	spin_lock(&gl->gl_lockref.lock);
-	if (gl->gl_state != LM_ST_UNLOCKED)
+	if (gl->gl_mode != LM_ST_UNLOCKED)
 		handle_callback(gl, LM_ST_UNLOCKED, 0, false);
 	__gfs2_glock_queue_work(gl, 0);
 	spin_unlock(&gl->gl_lockref.lock);
@@ -2008,9 +2008,9 @@ void gfs2_glock_finish_truncate(struct gfs2_inode *ip)
 	spin_unlock(&gl->gl_lockref.lock);
 }
 
-static const char *state2str(unsigned state)
+static const char *mode2str(unsigned mode)
 {
-	switch(state) {
+	switch(mode) {
 	case LM_ST_UNLOCKED:
 		return "UN";
 	case LM_ST_SHARED:
@@ -2072,7 +2072,7 @@ static void dump_holder(struct seq_file *seq, const struct gfs2_holder *gh,
 	if (gh->gh_owner_pid)
 		gh_owner = pid_task(gh->gh_owner_pid, PIDTYPE_PID);
 	gfs2_print_dbg(seq, "%s H: s:%s f:%s e:%d p:%ld [%s] %pS\n",
-		       fs_id_buf, state2str(gh->gh_state),
+		       fs_id_buf, mode2str(gh->gh_mode),
 		       hflags2str(flags_buf, gh->gh_flags, gh->gh_iflags),
 		       gh->gh_error,
 		       gh->gh_owner_pid ? (long)pid_nr(gh->gh_owner_pid) : -1,
@@ -2136,7 +2136,7 @@ static const char *gflags2str(char *buf, const struct gfs2_glock *gl)
  * followed by a colon and the field value, except for strings which are in
  * [] so that its possible to see if they are composed of spaces for
  * example. The field's are n = number (id of the object), f = flags,
- * t = type, s = state, r = refcount, e = error, p = pid.
+ * t = type, s = mode, r = refcount, e = error, p = pid.
  *
  */
 
@@ -2164,12 +2164,12 @@ void gfs2_dump_glock(struct seq_file *seq, struct gfs2_glock *gl, bool fsid)
 		dtime = 0;
 	gfs2_print_dbg(seq, "%sG:  s:%s n:%u/%llx f:%s t:%s d:%s/%llu a:%d "
 		       "v:%d r:%d m:%ld p:%lu\n",
-		       fs_id_buf, state2str(gl->gl_state),
+		       fs_id_buf, mode2str(gl->gl_mode),
 		       gl->gl_name.ln_type,
 		       (unsigned long long)gl->gl_name.ln_number,
 		       gflags2str(gflags_buf, gl),
-		       state2str(gl->gl_target),
-		       state2str(gl->gl_demote_state), dtime,
+		       mode2str(gl->gl_target),
+		       mode2str(gl->gl_demote_mode), dtime,
 		       atomic_read(&gl->gl_ail_count),
 		       atomic_read(&gl->gl_revokes),
 		       (int)gl->gl_lockref.count, gl->gl_hold_time, nrpages);
@@ -2177,7 +2177,7 @@ void gfs2_dump_glock(struct seq_file *seq, struct gfs2_glock *gl, bool fsid)
 	list_for_each_entry(gh, &gl->gl_holders, gh_list)
 		dump_holder(seq, gh, fs_id_buf);
 
-	if (gl->gl_state != LM_ST_UNLOCKED && glops->go_dump)
+	if (gl->gl_mode != LM_ST_UNLOCKED && glops->go_dump)
 		glops->go_dump(seq, gl, fs_id_buf);
 }
 

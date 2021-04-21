@@ -86,14 +86,14 @@ static int gfs2_rbm_find(struct gfs2_rbm *rbm, u8 state, u32 *minext,
  * gfs2_setbit - Set a bit in the bitmaps
  * @rbm: The position of the bit to set
  * @do_clone: Also set the clone bitmap, if it exists
- * @new_state: the new state of the block
+ * @new_mode: the new state of the block
  *
  */
 
 static inline void gfs2_setbit(const struct gfs2_rbm *rbm, bool do_clone,
-			       unsigned char new_state)
+			       unsigned char new_mode)
 {
-	unsigned char *byte1, *byte2, *end, cur_state;
+	unsigned char *byte1, *byte2, *end, cur_mode;
 	struct gfs2_bitmap *bi = rbm_bi(rbm);
 	unsigned int buflen = bi->bi_bytes;
 	const unsigned int bit = (rbm->offset % GFS2_NBBY) * GFS2_BIT_SIZE;
@@ -103,13 +103,13 @@ static inline void gfs2_setbit(const struct gfs2_rbm *rbm, bool do_clone,
 
 	BUG_ON(byte1 >= end);
 
-	cur_state = (*byte1 >> bit) & GFS2_BIT_MASK;
+	cur_mode = (*byte1 >> bit) & GFS2_BIT_MASK;
 
-	if (unlikely(!valid_change[new_state * 4 + cur_state])) {
+	if (unlikely(!valid_change[new_mode * 4 + cur_mode])) {
 		struct gfs2_sbd *sdp = rbm->rgd->rd_sbd;
 
-		fs_warn(sdp, "buf_blk = 0x%x old_state=%d, new_state=%d\n",
-			rbm->offset, cur_state, new_state);
+		fs_warn(sdp, "buf_blk = 0x%x old_state=%d, new_mode=%d\n",
+			rbm->offset, cur_mode, new_mode);
 		fs_warn(sdp, "rgrp=0x%llx bi_start=0x%x biblk: 0x%llx\n",
 			(unsigned long long)rbm->rgd->rd_addr, bi->bi_start,
 			(unsigned long long)bi->bi_bh->b_blocknr);
@@ -120,12 +120,12 @@ static inline void gfs2_setbit(const struct gfs2_rbm *rbm, bool do_clone,
 		gfs2_consist_rgrpd(rbm->rgd);
 		return;
 	}
-	*byte1 ^= (cur_state ^ new_state) << bit;
+	*byte1 ^= (cur_mode ^ new_mode) << bit;
 
 	if (do_clone && bi->bi_clone) {
 		byte2 = bi->bi_clone + bi->bi_offset + (rbm->offset / GFS2_NBBY);
-		cur_state = (*byte2 >> bit) & GFS2_BIT_MASK;
-		*byte2 ^= (cur_state ^ new_state) << bit;
+		cur_mode = (*byte2 >> bit) & GFS2_BIT_MASK;
+		*byte2 ^= (cur_mode ^ new_mode) << bit;
 	}
 }
 
@@ -725,7 +725,7 @@ void gfs2_clear_rgrpd(struct gfs2_sbd *sdp)
 		rb_erase(n, &sdp->sd_rindex_tree);
 
 		if (gl) {
-			if (gl->gl_state != LM_ST_UNLOCKED) {
+			if (gl->gl_mode != LM_ST_UNLOCKED) {
 				gfs2_glock_cb(gl, LM_ST_UNLOCKED);
 				flush_delayed_work(&gl->gl_work);
 			}
@@ -2029,7 +2029,7 @@ static inline int fast_to_acquire(struct gfs2_rgrpd *rgd)
 {
 	struct gfs2_glock *gl = rgd->rd_gl;
 
-	if (gl->gl_state != LM_ST_UNLOCKED && list_empty(&gl->gl_holders) &&
+	if (gl->gl_mode != LM_ST_UNLOCKED && list_empty(&gl->gl_holders) &&
 	    !test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags) &&
 	    !test_bit(GLF_DEMOTE, &gl->gl_flags))
 		return 1;
@@ -2231,7 +2231,7 @@ void gfs2_inplace_release(struct gfs2_inode *ip)
  * @n: The extent length (value/result)
  *
  * Add the bitmap buffer to the transaction.
- * Set the found bits to @new_state to change block's allocation state.
+ * Set the found bits to @new_mode to change block's allocation state.
  */
 static void gfs2_alloc_extent(const struct gfs2_rbm *rbm, bool dinode,
 			     unsigned int *n)
@@ -2263,11 +2263,11 @@ static void gfs2_alloc_extent(const struct gfs2_rbm *rbm, bool dinode,
  * @rgd: the resource group the blocks are in
  * @bstart: the start of a run of blocks to free
  * @blen: the length of the block run (all must lie within ONE RG!)
- * @new_state: GFS2_BLKST_XXX the after-allocation block state
+ * @new_mode: GFS2_BLKST_XXX the after-allocation block state
  */
 
 static void rgblk_free(struct gfs2_sbd *sdp, struct gfs2_rgrpd *rgd,
-		       u64 bstart, u32 blen, unsigned char new_state)
+		       u64 bstart, u32 blen, unsigned char new_mode)
 {
 	struct gfs2_rbm rbm;
 	struct gfs2_bitmap *bi, *bi_prev = NULL;
@@ -2288,7 +2288,7 @@ static void rgblk_free(struct gfs2_sbd *sdp, struct gfs2_rgrpd *rgd,
 			gfs2_trans_add_meta(rbm.rgd->rd_gl, bi->bi_bh);
 			bi_prev = bi;
 		}
-		gfs2_setbit(&rbm, false, new_state);
+		gfs2_setbit(&rbm, false, new_mode);
 		gfs2_rbm_add(&rbm, 1);
 	}
 }

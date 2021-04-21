@@ -262,7 +262,7 @@ struct gfs2_holder {
 	struct gfs2_glock *gh_gl;
 	struct pid *gh_owner_pid;
 	u16 gh_flags;
-	u16 gh_state;
+	u16 gh_mode;
 
 	int gh_error;
 	unsigned long gh_iflags; /* HIF_... */
@@ -337,11 +337,11 @@ struct gfs2_glock {
 
 	struct lockref gl_lockref;
 
-	/* State fields protected by gl_lockref.lock */
-	unsigned int gl_state:2,	/* Current state */
-		     gl_target:2,	/* Target state */
-		     gl_demote_state:2,	/* State requested by remote node */
-		     gl_req:2,		/* State in last dlm request */
+	/* Mode fields protected by gl_lockref.lock */
+	unsigned int gl_mode:2,		/* Current mode */
+		     gl_target:2,	/* Target mode */
+		     gl_demote_mode:2,	/* Mode requested by remote node */
+		     gl_req:2,		/* Mode in last dlm request */
 		     gl_reply:8;	/* Last reply from the dlm */
 
 	unsigned long gl_demote_time; /* time of first demote request */

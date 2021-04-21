@@ -67,8 +67,8 @@ static inline void gfs2_update_stats(struct gfs2_lkstats *s, unsigned index,
  *
  * The blocking flag is set on the glock for all dlm requests
  * which may potentially block due to lock requests from other nodes.
- * DLM requests where the current lock state is exclusive, the
- * requested state is null (or unlocked) or where the TRY or
+ * DLM requests where the current lock mode is exclusive, the
+ * requested mode is null (or unlocked) or where the TRY or
  * TRY_1CB flags are set are classified as non-blocking. All
  * other DLM requests are counted as (potentially) blocking.
  */
@@ -119,7 +119,7 @@ static inline void gfs2_update_request_times(struct gfs2_glock *gl)
 static void gdlm_ast(void *arg)
 {
 	struct gfs2_glock *gl = arg;
-	unsigned ret = gl->gl_state;
+	unsigned ret = gl->gl_mode;
 
 	gfs2_update_reply_times(gl);
 	BUG_ON(gl->gl_lksb.sb_flags & DLM_SBF_DEMOTED);
@@ -187,11 +187,11 @@ static void gdlm_bast(void *arg, int mode)
 	}
 }
 
-/* convert gfs lock-state to dlm lock-mode */
+/* convert gfs lock-mode to dlm lock-mode */
 
-static int make_mode(struct gfs2_sbd *sdp, const unsigned int lmstate)
+static int make_mode(struct gfs2_sbd *sdp, const unsigned int lmmode)
 {
-	switch (lmstate) {
+	switch (lmmode) {
 	case LM_ST_UNLOCKED:
 		return DLM_LOCK_NL;
 	case LM_ST_EXCLUSIVE:
@@ -201,7 +201,7 @@ static int make_mode(struct gfs2_sbd *sdp, const unsigned int lmstate)
 	case LM_ST_SHARED:
 		return DLM_LOCK_PR;
 	}
-	fs_err(sdp, "unknown LM state %d\n", lmstate);
+	fs_err(sdp, "unknown LM mode %d\n", lmmode);
 	BUG();
 	return -1;
 }
@@ -254,7 +254,7 @@ static void gfs2_reverse_hex(char *c, u64 value)
 	}
 }
 
-static int gdlm_lock(struct gfs2_glock *gl, unsigned int req_state,
+static int gdlm_lock(struct gfs2_glock *gl, unsigned int req_mode,
 		     unsigned int flags)
 {
 	struct lm_lockstruct *ls = &gl->gl_name.ln_sbd->sd_lockstruct;
@@ -262,7 +262,7 @@ static int gdlm_lock(struct gfs2_glock *gl, unsigned int req_state,
 	u32 lkf;
 	char strname[GDLM_STRNAME_BYTES] = "";
 
-	req = make_mode(gl->gl_name.ln_sbd, req_state);
+	req = make_mode(gl->gl_name.ln_sbd, req_mode);
 	lkf = make_flags(gl, flags, req);
 	gfs2_glstats_inc(gl, GFS2_LKS_DCOUNT);
 	gfs2_sbstats_inc(gl, GFS2_LKS_DCOUNT);

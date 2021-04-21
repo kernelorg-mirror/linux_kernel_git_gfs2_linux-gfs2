@@ -1245,7 +1245,7 @@ static int gfs2_xattr_set(const struct xattr_handler *handler,
 		if (ret)
 			goto out;
 	} else {
-		if (WARN_ON_ONCE(ip->i_gl->gl_state != LM_ST_EXCLUSIVE)) {
+		if (WARN_ON_ONCE(ip->i_gl->gl_mode != LM_ST_EXCLUSIVE)) {
 			ret = -EIO;
 			goto out;
 		}

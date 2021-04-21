@@ -18,15 +18,15 @@
 #include "glock.h"
 #include "rgrp.h"
 
-#define dlm_state_name(nn) { DLM_LOCK_##nn, #nn }
+#define dlm_mode_name(nn) { DLM_LOCK_##nn, #nn }
 #define glock_trace_name(x) __print_symbolic(x,		\
-			    dlm_state_name(IV),		\
-			    dlm_state_name(NL),		\
-			    dlm_state_name(CR),		\
-			    dlm_state_name(CW),		\
-			    dlm_state_name(PR),		\
-			    dlm_state_name(PW),		\
-			    dlm_state_name(EX))
+			    dlm_mode_name(IV),		\
+			    dlm_mode_name(NL),		\
+			    dlm_mode_name(CR),		\
+			    dlm_mode_name(CW),		\
+			    dlm_mode_name(PR),		\
+			    dlm_mode_name(PW),		\
+			    dlm_mode_name(EX))
 
 #define block_state_name(x) __print_symbolic(x,			\
 			    { GFS2_BLKST_FREE, "free" },	\
@@ -62,9 +62,9 @@
 
 #ifndef NUMPTY
 #define NUMPTY
-static inline u8 glock_trace_state(unsigned int state)
+static inline u8 glock_trace_mode(unsigned int mode)
 {
-	switch(state) {
+	switch (mode) {
 	case LM_ST_SHARED:
 		return DLM_LOCK_PR;
 	case LM_ST_DEFERRED:
@@ -79,28 +79,28 @@ static inline u8 glock_trace_state(unsigned int state)
 /* Section 1 - Locking
  *
  * Objectives:
- * Latency: Remote demote request to state change
- * Latency: Local lock request to state change
- * Latency: State change to lock grant
- * Correctness: Ordering of local lock state vs. I/O requests
+ * Latency: Remote demote request to mode change
+ * Latency: Local lock request to mode change
+ * Latency: Mode change to lock grant
+ * Correctness: Ordering of local lock mode vs. I/O requests
  * Correctness: Responses to remote demote requests
  */
 
-/* General glock state change (DLM lock request completes) */
-TRACE_EVENT(gfs2_glock_state_change,
+/* General glock mode change (DLM lock request completes) */
+TRACE_EVENT(gfs2_glock_mode_change,
 
-	TP_PROTO(const struct gfs2_glock *gl, unsigned int new_state),
+	TP_PROTO(const struct gfs2_glock *gl, unsigned int new_mode),
 
-	TP_ARGS(gl, new_state),
+	TP_ARGS(gl, new_mode),
 
 	TP_STRUCT__entry(
 		__field(	dev_t,	dev			)
 		__field(	u64,	glnum			)
 		__field(	u32,	gltype			)
-		__field(	u8,	cur_state		)
-		__field(	u8,	new_state		)
-		__field(	u8,	dmt_state		)
-		__field(	u8,	tgt_state		)
+		__field(	u8,	cur_mode		)
+		__field(	u8,	new_mode		)
+		__field(	u8,	dmt_mode		)
+		__field(	u8,	tgt_mode		)
 		__field(	unsigned long,	flags		)
 	),
 
@@ -108,24 +108,24 @@ TRACE_EVENT(gfs2_glock_state_change,
 		__entry->dev		= gl->gl_name.ln_sbd->sd_vfs->s_dev;
 		__entry->glnum		= gl->gl_name.ln_number;
 		__entry->gltype		= gl->gl_name.ln_type;
-		__entry->cur_state	= glock_trace_state(gl->gl_state);
-		__entry->new_state	= glock_trace_state(new_state);
-		__entry->tgt_state	= glock_trace_state(gl->gl_target);
-		__entry->dmt_state	= glock_trace_state(gl->gl_demote_state);
+		__entry->cur_mode	= glock_trace_mode(gl->gl_mode);
+		__entry->new_mode	= glock_trace_mode(new_mode);
+		__entry->tgt_mode	= glock_trace_mode(gl->gl_target);
+		__entry->dmt_mode	= glock_trace_mode(gl->gl_demote_mode);
 		__entry->flags		= gl->gl_flags | (gl->gl_object ? (1UL<<GLF_OBJECT) : 0);
 	),
 
-	TP_printk("%u,%u glock %d:%lld state %s to %s tgt:%s dmt:%s flags:%s",
+	TP_printk("%u,%u glock %d:%lld mode %s to %s tgt:%s dmt:%s flags:%s",
 		  MAJOR(__entry->dev), MINOR(__entry->dev), __entry->gltype,
 		 (unsigned long long)__entry->glnum,
-		  glock_trace_name(__entry->cur_state),
-		  glock_trace_name(__entry->new_state),
-		  glock_trace_name(__entry->tgt_state),
-		  glock_trace_name(__entry->dmt_state),
+		  glock_trace_name(__entry->cur_mode),
+		  glock_trace_name(__entry->new_mode),
+		  glock_trace_name(__entry->tgt_mode),
+		  glock_trace_name(__entry->dmt_mode),
 		  show_glock_flags(__entry->flags))
 );
 
-/* State change -> unlocked, glock is being deallocated */
+/* Mode change -> unlocked, glock is being deallocated */
 TRACE_EVENT(gfs2_glock_put,
 
 	TP_PROTO(const struct gfs2_glock *gl),
@@ -136,7 +136,7 @@ TRACE_EVENT(gfs2_glock_put,
 		__field(        dev_t,  dev                     )
 		__field(	u64,	glnum			)
 		__field(	u32,	gltype			)
-		__field(	u8,	cur_state		)
+		__field(	u8,	cur_mode		)
 		__field(	unsigned long,	flags		)
 	),
 
@@ -144,14 +144,14 @@ TRACE_EVENT(gfs2_glock_put,
 		__entry->dev		= gl->gl_name.ln_sbd->sd_vfs->s_dev;
 		__entry->gltype		= gl->gl_name.ln_type;
 		__entry->glnum		= gl->gl_name.ln_number;
-		__entry->cur_state	= glock_trace_state(gl->gl_state);
+		__entry->cur_mode	= glock_trace_mode(gl->gl_mode);
 		__entry->flags		= gl->gl_flags  | (gl->gl_object ? (1UL<<GLF_OBJECT) : 0);
 	),
 
-	TP_printk("%u,%u glock %d:%lld state %s => %s flags:%s",
+	TP_printk("%u,%u glock %d:%lld mode %s => %s flags:%s",
 		  MAJOR(__entry->dev), MINOR(__entry->dev),
                   __entry->gltype, (unsigned long long)__entry->glnum,
-                  glock_trace_name(__entry->cur_state),
+                  glock_trace_name(__entry->cur_mode),
 		  glock_trace_name(DLM_LOCK_IV),
 		  show_glock_flags(__entry->flags))
 
@@ -168,8 +168,8 @@ TRACE_EVENT(gfs2_demote_rq,
 		__field(        dev_t,  dev                     )
 		__field(	u64,	glnum			)
 		__field(	u32,	gltype			)
-		__field(	u8,	cur_state		)
-		__field(	u8,	dmt_state		)
+		__field(	u8,	cur_mode		)
+		__field(	u8,	dmt_mode		)
 		__field(	unsigned long,	flags		)
 		__field(	bool,	remote			)
 	),
@@ -178,8 +178,8 @@ TRACE_EVENT(gfs2_demote_rq,
 		__entry->dev		= gl->gl_name.ln_sbd->sd_vfs->s_dev;
 		__entry->gltype		= gl->gl_name.ln_type;
 		__entry->glnum		= gl->gl_name.ln_number;
-		__entry->cur_state	= glock_trace_state(gl->gl_state);
-		__entry->dmt_state	= glock_trace_state(gl->gl_demote_state);
+		__entry->cur_mode	= glock_trace_mode(gl->gl_mode);
+		__entry->dmt_mode	= glock_trace_mode(gl->gl_demote_mode);
 		__entry->flags		= gl->gl_flags  | (gl->gl_object ? (1UL<<GLF_OBJECT) : 0);
 		__entry->remote		= remote;
 	),
@@ -187,8 +187,8 @@ TRACE_EVENT(gfs2_demote_rq,
 	TP_printk("%u,%u glock %d:%lld demote %s to %s flags:%s %s",
 		  MAJOR(__entry->dev), MINOR(__entry->dev), __entry->gltype,
 		  (unsigned long long)__entry->glnum,
-                  glock_trace_name(__entry->cur_state),
-                  glock_trace_name(__entry->dmt_state),
+                  glock_trace_name(__entry->cur_mode),
+                  glock_trace_name(__entry->dmt_mode),
 		  show_glock_flags(__entry->flags),
 		  __entry->remote ? "remote" : "local")
 
@@ -206,7 +206,7 @@ TRACE_EVENT(gfs2_promote,
 		__field(	u64,	glnum			)
 		__field(	u32,	gltype			)
 		__field(	int,	first			)
-		__field(	u8,	state			)
+		__field(	u8,	mode			)
 	),
 
 	TP_fast_assign(
@@ -214,14 +214,14 @@ TRACE_EVENT(gfs2_promote,
 		__entry->glnum	= gh->gh_gl->gl_name.ln_number;
 		__entry->gltype	= gh->gh_gl->gl_name.ln_type;
 		__entry->first	= first;
-		__entry->state	= glock_trace_state(gh->gh_state);
+		__entry->mode	= glock_trace_mode(gh->gh_mode);
 	),
 
 	TP_printk("%u,%u glock %u:%llu promote %s %s",
 		  MAJOR(__entry->dev), MINOR(__entry->dev), __entry->gltype,
 		  (unsigned long long)__entry->glnum,
 		  __entry->first ? "first": "other",
-		  glock_trace_name(__entry->state))
+		  glock_trace_name(__entry->mode))
 );
 
 /* Queue/dequeue a lock request */
@@ -236,7 +236,7 @@ TRACE_EVENT(gfs2_glock_queue,
 		__field(	u64,	glnum			)
 		__field(	u32,	gltype			)
 		__field(	int,	queue			)
-		__field(	u8,	state			)
+		__field(	u8,	mode			)
 	),
 
 	TP_fast_assign(
@@ -244,14 +244,14 @@ TRACE_EVENT(gfs2_glock_queue,
 		__entry->glnum	= gh->gh_gl->gl_name.ln_number;
 		__entry->gltype	= gh->gh_gl->gl_name.ln_type;
 		__entry->queue	= queue;
-		__entry->state	= glock_trace_state(gh->gh_state);
+		__entry->mode	= glock_trace_mode(gh->gh_mode);
 	),
 
 	TP_printk("%u,%u glock %u:%llu %squeue %s",
 		  MAJOR(__entry->dev), MINOR(__entry->dev), __entry->gltype,
 		  (unsigned long long)__entry->glnum,
 		  __entry->queue ? "" : "de",
-		  glock_trace_name(__entry->state))
+		  glock_trace_name(__entry->mode))
 );
 
 /* DLM sends a reply to GFS2 */

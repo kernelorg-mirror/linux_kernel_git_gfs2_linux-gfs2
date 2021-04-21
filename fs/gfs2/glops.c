@@ -193,7 +193,7 @@ static int rgrp_go_sync(struct gfs2_glock *gl)
 
 	if (!test_and_clear_bit(GLF_DIRTY, &gl->gl_flags))
 		return 0;
-	GLOCK_BUG_ON(gl, gl->gl_state != LM_ST_EXCLUSIVE);
+	GLOCK_BUG_ON(gl, gl->gl_mode != LM_ST_EXCLUSIVE);
 
 	gfs2_log_flush(sdp, gl, GFS2_LOG_HEAD_FLUSH_NORMAL |
 		       GFS2_LFC_RGRP_GO_SYNC);
@@ -308,7 +308,7 @@ static int inode_go_sync(struct gfs2_glock *gl)
 	if (!test_and_clear_bit(GLF_DIRTY, &gl->gl_flags))
 		goto out;
 
-	GLOCK_BUG_ON(gl, gl->gl_state != LM_ST_EXCLUSIVE);
+	GLOCK_BUG_ON(gl, gl->gl_mode != LM_ST_EXCLUSIVE);
 
 	gfs2_log_flush(gl->gl_name.ln_sbd, gl, GFS2_LOG_HEAD_FLUSH_NORMAL |
 		       GFS2_LFC_INODE_GO_SYNC);
@@ -497,12 +497,12 @@ static int inode_go_lock(struct gfs2_holder *gh)
 			return error;
 	}
 
-	if (gh->gh_state != LM_ST_DEFERRED)
+	if (gh->gh_mode != LM_ST_DEFERRED)
 		inode_dio_wait(&ip->i_inode);
 
 	if ((ip->i_diskflags & GFS2_DIF_TRUNC_IN_PROG) &&
-	    (gl->gl_state == LM_ST_EXCLUSIVE) &&
-	    (gh->gh_state == LM_ST_EXCLUSIVE)) {
+	    (gl->gl_mode == LM_ST_EXCLUSIVE) &&
+	    (gh->gh_mode == LM_ST_EXCLUSIVE)) {
 		spin_lock(&sdp->sd_trunc_lock);
 		if (list_empty(&ip->i_trunc_list))
 			list_add(&ip->i_trunc_list, &sdp->sd_trunc_list);
@@ -556,7 +556,7 @@ static int freeze_go_sync(struct gfs2_glock *gl)
 	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
 
 	/*
-	 * We need to check gl_state == LM_ST_SHARED here and not gl_req ==
+	 * We need to check gl_mode == LM_ST_SHARED here and not gl_req ==
 	 * LM_ST_EXCLUSIVE. That's because when any node does a freeze,
 	 * all the nodes should have the freeze glock in SH mode and they all
 	 * call do_xmote: One for EX and the others for UN. They ALL must
@@ -566,7 +566,7 @@ static int freeze_go_sync(struct gfs2_glock *gl)
 	 * Once thawed, the work func acquires the freeze glock in
 	 * SH and everybody goes back to thawed.
 	 */
-	if (gl->gl_state == LM_ST_SHARED && !gfs2_withdrawn(sdp) &&
+	if (gl->gl_mode == LM_ST_SHARED && !gfs2_withdrawn(sdp) &&
 	    !test_bit(SDF_NORECOVERY, &sdp->sd_flags)) {
 		atomic_set(&sdp->sd_freeze_state, SFS_STARTING_FREEZE);
 		error = freeze_super(sdp->sd_vfs);
@@ -647,8 +647,8 @@ static void iopen_go_callback(struct gfs2_glock *gl, bool remote)
 	if (!remote || sb_rdonly(sdp->sd_vfs))
 		return;
 
-	if (gl->gl_demote_state == LM_ST_UNLOCKED &&
-	    gl->gl_state == LM_ST_SHARED && ip) {
+	if (gl->gl_demote_mode == LM_ST_UNLOCKED &&
+	    gl->gl_mode == LM_ST_SHARED && ip) {
 		gl->gl_lockref.count++;
 		if (!queue_delayed_work(gfs2_delete_workqueue,
 					&gl->gl_delete, 0))
@@ -708,7 +708,7 @@ static void nondisk_go_callback(struct gfs2_glock *gl, bool remote)
 
 	/* We only care when a node wants us to unlock, because that means
 	 * they want a journal recovered. */
-	if (gl->gl_demote_state != LM_ST_UNLOCKED)
+	if (gl->gl_demote_mode != LM_ST_UNLOCKED)
 		return;
 
 	if (sdp->sd_args.ar_spectator) {
