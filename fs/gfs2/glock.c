@@ -195,7 +195,7 @@ static int demote_ok(const struct gfs2_glock *gl)
 {
 	const struct gfs2_glock_operations *glops = gl->gl_ops;
 
-	if (gl->gl_mode == LM_ST_UNLOCKED)
+	if (gl_mode(gl) == LM_ST_UNLOCKED)
 		return 0;
 	if (!list_empty(&gl->gl_holders))
 		return 0;
@@ -203,7 +203,6 @@ static int demote_ok(const struct gfs2_glock *gl)
 		return glops->go_demote_ok(gl);
 	return 1;
 }
-
 
 void gfs2_glock_add_to_lru(struct gfs2_glock *gl)
 {
@@ -313,6 +312,7 @@ void gfs2_glock_put(struct gfs2_glock *gl)
 static inline int may_grant(const struct gfs2_glock *gl, const struct gfs2_holder *gh)
 {
 	const struct gfs2_holder *gh_head = list_first_entry(&gl->gl_holders, const struct gfs2_holder, gh_list);
+	int curmode = gl_mode(gl);
 
 	if (gh != gh_head) {
 		/**
@@ -330,17 +330,17 @@ static inline int may_grant(const struct gfs2_glock *gl, const struct gfs2_holde
 		     gh_head->gh_mode == LM_ST_EXCLUSIVE))
 			return 0;
 	}
-	if (gl->gl_mode == gh->gh_mode)
+	if (curmode == gh->gh_mode)
 		return 1;
 	if (gh->gh_flags & GL_EXACT)
 		return 0;
-	if (gl->gl_mode == LM_ST_EXCLUSIVE) {
+	if (curmode == LM_ST_EXCLUSIVE) {
 		if (gh->gh_mode == LM_ST_SHARED && gh_head->gh_mode == LM_ST_SHARED)
 			return 1;
 		if (gh->gh_mode == LM_ST_DEFERRED && gh_head->gh_mode == LM_ST_DEFERRED)
 			return 1;
 	}
-	if (gl->gl_mode != LM_ST_UNLOCKED && (gh->gh_flags & LM_FLAG_ANY))
+	if (curmode != LM_ST_UNLOCKED && (gh->gh_flags & LM_FLAG_ANY))
 		return 1;
 	return 0;
 }
@@ -585,7 +585,7 @@ __acquires(&gl->gl_lockref.lock)
 		return;
 	lck_flags &= (LM_FLAG_TRY | LM_FLAG_TRY_1CB | LM_FLAG_NOEXP |
 		      LM_FLAG_PRIORITY);
-	GLOCK_BUG_ON(gl, gl->gl_mode == target);
+	GLOCK_BUG_ON(gl, gl_mode(gl) == target);
 	if ((target == LM_ST_UNLOCKED || target == LM_ST_DEFERRED) &&
 	    glops->go_inval) {
 		/*
@@ -715,7 +715,7 @@ __acquires(&gl->gl_lockref.lock)
 	GLOCK_BUG_ON(gl, test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags));
 
 	if (test_bit(GLF_DEMOTE, &gl->gl_flags) &&
-	    gl->gl_demote_mode != gl->gl_mode) {
+	    gl->gl_demote_mode != gl_mode(gl)) {
 		if (find_first_holder(gl)) {
 			clear_bit(GLF_LOCK, &gl->gl_flags);
 			smp_mb__after_atomic();
@@ -885,7 +885,7 @@ static void glock_work_func(struct work_struct *work)
 	}
 	spin_lock(&gl->gl_lockref.lock);
 	if (test_bit(GLF_PENDING_DEMOTE, &gl->gl_flags) &&
-	    gl->gl_mode != LM_ST_UNLOCKED &&
+	    gl_mode(gl) != LM_ST_UNLOCKED &&
 	    gl->gl_demote_mode != LM_ST_EXCLUSIVE) {
 		unsigned long holdtime, now = jiffies;
 
@@ -1012,7 +1012,7 @@ int gfs2_glock_get(struct gfs2_sbd *sdp, u64 number,
 	gl->gl_name = name;
 	lockdep_set_subclass(&gl->gl_lockref.lock, glops->go_subclass);
 	gl->gl_lockref.count = 1;
-	gl->gl_mode = LM_ST_UNLOCKED;
+	gl->gl_reply = LM_ST_UNLOCKED;
 	gl->gl_demote_mode = LM_ST_EXCLUSIVE;
 	gl->gl_ops = glops;
 	gl->gl_dstamp = 0;
@@ -1686,7 +1686,7 @@ void gfs2_glock_complete(struct gfs2_glock *gl, int ret)
 	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
 	int held1, held2;
 
-	held1 = (gl->gl_mode != LM_ST_UNLOCKED);
+	held1 = (gl_mode(gl) != LM_ST_UNLOCKED);
 	held2 = ((ret & LM_OUT_ST_MASK) != LM_ST_UNLOCKED);
 
 	if (held1 != held2) {
@@ -1696,7 +1696,6 @@ void gfs2_glock_complete(struct gfs2_glock *gl, int ret)
 		else
 			gl->gl_lockref.count--;
 	}
-	gl->gl_mode = ret & LM_OUT_ST_MASK;
 	gl->gl_tchange = jiffies;
 	gl->gl_reply = ret;
 
@@ -1947,7 +1946,7 @@ static void clear_glock(struct gfs2_glock *gl)
 	gfs2_glock_remove_from_lru(gl);
 
 	spin_lock(&gl->gl_lockref.lock);
-	if (gl->gl_mode != LM_ST_UNLOCKED)
+	if (gl_mode(gl) != LM_ST_UNLOCKED)
 		handle_callback(gl, LM_ST_UNLOCKED, 0, false);
 	__gfs2_glock_queue_work(gl, 0);
 	spin_unlock(&gl->gl_lockref.lock);
@@ -2165,7 +2164,7 @@ void gfs2_dump_glock(struct seq_file *seq, struct gfs2_glock *gl, bool fsid)
 		dtime = 0;
 	gfs2_print_dbg(seq, "%sG:  s:%s n:%u/%llx f:%s d:%s/%llu a:%d "
 		       "v:%d r:%d m:%ld p:%lu\n",
-		       fs_id_buf, mode2str(gl->gl_mode),
+		       fs_id_buf, mode2str(gl_mode(gl)),
 		       gl->gl_name.ln_type,
 		       (unsigned long long)gl->gl_name.ln_number,
 		       gflags2str(gflags_buf, gl),
@@ -2177,7 +2176,7 @@ void gfs2_dump_glock(struct seq_file *seq, struct gfs2_glock *gl, bool fsid)
 	list_for_each_entry(gh, &gl->gl_holders, gh_list)
 		dump_holder(seq, gh, fs_id_buf);
 
-	if (gl->gl_mode != LM_ST_UNLOCKED && glops->go_dump)
+	if (gl_mode(gl) != LM_ST_UNLOCKED && glops->go_dump)
 		glops->go_dump(seq, gl, fs_id_buf);
 }
 

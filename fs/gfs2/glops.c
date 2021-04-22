@@ -193,7 +193,7 @@ static int rgrp_go_sync(struct gfs2_glock *gl)
 
 	if (!test_and_clear_bit(GLF_DIRTY, &gl->gl_flags))
 		return 0;
-	GLOCK_BUG_ON(gl, gl->gl_mode != LM_ST_EXCLUSIVE);
+	GLOCK_BUG_ON(gl, gl_mode(gl) != LM_ST_EXCLUSIVE);
 
 	gfs2_log_flush(sdp, gl, GFS2_LOG_HEAD_FLUSH_NORMAL |
 		       GFS2_LFC_RGRP_GO_SYNC);
@@ -308,7 +308,7 @@ static int inode_go_sync(struct gfs2_glock *gl)
 	if (!test_and_clear_bit(GLF_DIRTY, &gl->gl_flags))
 		goto out;
 
-	GLOCK_BUG_ON(gl, gl->gl_mode != LM_ST_EXCLUSIVE);
+	GLOCK_BUG_ON(gl, gl_mode(gl) != LM_ST_EXCLUSIVE);
 
 	gfs2_log_flush(gl->gl_name.ln_sbd, gl, GFS2_LOG_HEAD_FLUSH_NORMAL |
 		       GFS2_LFC_INODE_GO_SYNC);
@@ -501,7 +501,7 @@ static int inode_go_lock(struct gfs2_holder *gh)
 		inode_dio_wait(&ip->i_inode);
 
 	if ((ip->i_diskflags & GFS2_DIF_TRUNC_IN_PROG) &&
-	    (gl->gl_mode == LM_ST_EXCLUSIVE) &&
+	    (gl_mode(gl) == LM_ST_EXCLUSIVE) &&
 	    (gh->gh_mode == LM_ST_EXCLUSIVE)) {
 		spin_lock(&sdp->sd_trunc_lock);
 		if (list_empty(&ip->i_trunc_list))
@@ -566,7 +566,7 @@ static int freeze_go_sync(struct gfs2_glock *gl)
 	 * Once thawed, the work func acquires the freeze glock in
 	 * SH and everybody goes back to thawed.
 	 */
-	if (gl->gl_mode == LM_ST_SHARED && !gfs2_withdrawn(sdp) &&
+	if (gl_mode(gl) == LM_ST_SHARED && !gfs2_withdrawn(sdp) &&
 	    !test_bit(SDF_NORECOVERY, &sdp->sd_flags)) {
 		atomic_set(&sdp->sd_freeze_state, SFS_STARTING_FREEZE);
 		error = freeze_super(sdp->sd_vfs);
@@ -648,7 +648,7 @@ static void iopen_go_callback(struct gfs2_glock *gl, bool remote)
 		return;
 
 	if (gl->gl_demote_mode == LM_ST_UNLOCKED &&
-	    gl->gl_mode == LM_ST_SHARED && ip) {
+	    gl_mode(gl) == LM_ST_SHARED && ip) {
 		gl->gl_lockref.count++;
 		if (!queue_delayed_work(gfs2_delete_workqueue,
 					&gl->gl_delete, 0))

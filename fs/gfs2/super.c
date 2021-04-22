@@ -534,7 +534,7 @@ static void gfs2_dirty_inode(struct inode *inode, int flags)
 			return;
 		}
 		need_unlock = 1;
-	} else if (WARN_ON_ONCE(ip->i_gl->gl_mode != LM_ST_EXCLUSIVE))
+	} else if (WARN_ON_ONCE(gl_mode(ip->i_gl) != LM_ST_EXCLUSIVE))
 		return;
 
 	if (current->journal_info == NULL) {

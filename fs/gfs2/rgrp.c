@@ -725,7 +725,7 @@ void gfs2_clear_rgrpd(struct gfs2_sbd *sdp)
 		rb_erase(n, &sdp->sd_rindex_tree);
 
 		if (gl) {
-			if (gl->gl_mode != LM_ST_UNLOCKED) {
+			if (gl_mode(gl) != LM_ST_UNLOCKED) {
 				gfs2_glock_cb(gl, LM_ST_UNLOCKED);
 				flush_delayed_work(&gl->gl_work);
 			}
@@ -2029,7 +2029,7 @@ static inline int fast_to_acquire(struct gfs2_rgrpd *rgd)
 {
 	struct gfs2_glock *gl = rgd->rd_gl;
 
-	if (gl->gl_mode != LM_ST_UNLOCKED && list_empty(&gl->gl_holders) &&
+	if (gl_mode(gl) != LM_ST_UNLOCKED && list_empty(&gl->gl_holders) &&
 	    !test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags) &&
 	    !test_bit(GLF_DEMOTE, &gl->gl_flags))
 		return 1;

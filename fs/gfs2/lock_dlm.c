@@ -119,7 +119,7 @@ static inline void gfs2_update_request_times(struct gfs2_glock *gl)
 static void gdlm_ast(void *arg)
 {
 	struct gfs2_glock *gl = arg;
-	unsigned ret = gl->gl_mode;
+	unsigned ret = gl_mode(gl);
 
 	gfs2_update_reply_times(gl);
 	BUG_ON(gl->gl_lksb.sb_flags & DLM_SBF_DEMOTED);
@@ -264,7 +264,7 @@ static int gdlm_lock(struct gfs2_glock *gl, unsigned int req_mode,
 
 	set_bit(GLF_BLOCKING, &gl->gl_flags);
 	if ((req_mode == LM_ST_UNLOCKED) ||
-	    (gl->gl_mode == LM_ST_EXCLUSIVE) ||
+	    (gl_mode(gl) == LM_ST_EXCLUSIVE) ||
 	    (flags & (LM_FLAG_TRY|LM_FLAG_TRY_1CB)))
 		clear_bit(GLF_BLOCKING, &gl->gl_flags);
 

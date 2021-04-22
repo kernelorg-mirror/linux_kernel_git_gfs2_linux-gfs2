@@ -160,19 +160,24 @@ out:
 	return gh;
 }
 
-static inline int gfs2_glock_is_held_excl(struct gfs2_glock *gl)
+static inline const int gl_mode(const struct gfs2_glock *gl)
 {
-	return gl->gl_mode == LM_ST_EXCLUSIVE;
+	return gl->gl_reply & LM_OUT_ST_MASK;
 }
 
-static inline int gfs2_glock_is_held_dfrd(struct gfs2_glock *gl)
+static inline int gfs2_glock_is_held_excl(const struct gfs2_glock *gl)
 {
-	return gl->gl_mode == LM_ST_DEFERRED;
+	return gl_mode(gl) == LM_ST_EXCLUSIVE;
 }
 
-static inline int gfs2_glock_is_held_shrd(struct gfs2_glock *gl)
+static inline int gfs2_glock_is_held_dfrd(const struct gfs2_glock *gl)
 {
-	return gl->gl_mode == LM_ST_SHARED;
+	return gl_mode(gl) == LM_ST_DEFERRED;
+}
+
+static inline int gfs2_glock_is_held_shrd(const struct gfs2_glock *gl)
+{
+	return gl_mode(gl) == LM_ST_SHARED;
 }
 
 static inline struct address_space *gfs2_glock2aspace(struct gfs2_glock *gl)

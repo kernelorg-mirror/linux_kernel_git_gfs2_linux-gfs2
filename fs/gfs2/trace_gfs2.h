@@ -62,7 +62,7 @@
 
 #ifndef NUMPTY
 #define NUMPTY
-static inline u8 glock_trace_mode(unsigned int mode)
+static inline const u8 glock_trace_mode(const unsigned int mode)
 {
 	switch (mode) {
 	case LM_ST_SHARED:
@@ -107,7 +107,7 @@ TRACE_EVENT(gfs2_glock_mode_change,
 		__entry->dev		= gl->gl_name.ln_sbd->sd_vfs->s_dev;
 		__entry->glnum		= gl->gl_name.ln_number;
 		__entry->gltype		= gl->gl_name.ln_type;
-		__entry->cur_mode	= glock_trace_mode(gl->gl_mode);
+		__entry->cur_mode	= glock_trace_mode(gl_mode(gl));
 		__entry->new_mode	= glock_trace_mode(new_mode);
 		__entry->dmt_mode	= glock_trace_mode(gl->gl_demote_mode);
 		__entry->flags		= gl->gl_flags | (gl->gl_object ? (1UL<<GLF_OBJECT) : 0);
@@ -141,7 +141,7 @@ TRACE_EVENT(gfs2_glock_put,
 		__entry->dev		= gl->gl_name.ln_sbd->sd_vfs->s_dev;
 		__entry->gltype		= gl->gl_name.ln_type;
 		__entry->glnum		= gl->gl_name.ln_number;
-		__entry->cur_mode	= glock_trace_mode(gl->gl_mode);
+		__entry->cur_mode	= glock_trace_mode(gl_mode(gl));
 		__entry->flags		= gl->gl_flags  | (gl->gl_object ? (1UL<<GLF_OBJECT) : 0);
 	),
 
@@ -175,7 +175,7 @@ TRACE_EVENT(gfs2_demote_rq,
 		__entry->dev		= gl->gl_name.ln_sbd->sd_vfs->s_dev;
 		__entry->gltype		= gl->gl_name.ln_type;
 		__entry->glnum		= gl->gl_name.ln_number;
-		__entry->cur_mode	= glock_trace_mode(gl->gl_mode);
+		__entry->cur_mode	= glock_trace_mode(gl_mode(gl));
 		__entry->dmt_mode	= glock_trace_mode(gl->gl_demote_mode);
 		__entry->flags		= gl->gl_flags  | (gl->gl_object ? (1UL<<GLF_OBJECT) : 0);
 		__entry->remote		= remote;
