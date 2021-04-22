@@ -452,30 +452,6 @@ static inline struct gfs2_holder *find_first_waiter(const struct gfs2_glock *gl)
 	return NULL;
 }
 
-/**
- * mode_change - record that the glock is now in a different mode
- * @gl: the glock
- * @new_mode: the new mode
- */
-
-static void mode_change(struct gfs2_glock *gl, unsigned int new_mode)
-{
-	int held1, held2;
-
-	held1 = (gl->gl_mode != LM_ST_UNLOCKED);
-	held2 = (new_mode != LM_ST_UNLOCKED);
-
-	if (held1 != held2) {
-		GLOCK_BUG_ON(gl, __lockref_is_dead(&gl->gl_lockref));
-		if (held2)
-			gl->gl_lockref.count++;
-		else
-			gl->gl_lockref.count--;
-	}
-	gl->gl_mode = new_mode;
-	gl->gl_tchange = jiffies;
-}
-
 static void gfs2_set_demote(struct gfs2_glock *gl)
 {
 	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
@@ -494,7 +470,7 @@ static void gfs2_demote_wake(struct gfs2_glock *gl)
 }
 
 /**
- * finish_xmote - The DLM has replied to one of our lock requests
+ * finish_xmote - The lock manager has replied to one of our lock requests
  * @gl: The glock
  *
  */
@@ -508,7 +484,6 @@ static void finish_xmote(struct gfs2_glock *gl)
 
 	spin_lock(&gl->gl_lockref.lock);
 	trace_gfs2_glock_mode_change(gl, mode);
-	mode_change(gl, mode);
 	gh = find_first_waiter(gl);
 
 	/* Check for dlm mode != requested mode */
@@ -658,7 +633,6 @@ __acquires(&gl->gl_lockref.lock)
 	}
 
 skip_inval:
-	gfs2_glock_hold(gl);
 	/*
 	 * Check for an error encountered since we called go_sync and go_inval.
 	 * If so, we can't withdraw from the glock code because the withdraw
@@ -680,25 +654,25 @@ skip_inval:
 	if (glock_blocked_by_withdraw(gl)) {
 		if (target != LM_ST_UNLOCKED ||
 		    test_bit(SDF_WITHDRAW_RECOVERY, &sdp->sd_flags)) {
+			gfs2_glock_hold(gl);
 			gfs2_glock_queue_work(gl, GL_GLOCK_DFT_HOLD);
 			goto out;
 		}
 	}
 
 	if (sdp->sd_lockstruct.ls_ops->lm_lock)	{
+		gfs2_glock_hold(gl);
 		/* lock_dlm */
 		ret = sdp->sd_lockstruct.ls_ops->lm_lock(gl, target, lck_flags);
 		if (ret == -EINVAL && target == LM_ST_UNLOCKED &&
 		    test_bit(SDF_SKIP_DLM_UNLOCK, &sdp->sd_flags)) {
-			finish_xmote(gl);
-			gfs2_glock_queue_work(gl, 0);
+			gfs2_glock_complete(gl, 0);
 		} else if (ret) {
 			fs_err(sdp, "lm_lock ret %d\n", ret);
 			GLOCK_BUG_ON(gl, !gfs2_withdrawn(sdp));
 		}
 	} else { /* lock_nolock */
-		finish_xmote(gl);
-		gfs2_glock_queue_work(gl, 0);
+		gfs2_glock_complete(gl, target);
 	}
 out:
 	spin_lock(&gl->gl_lockref.lock);
@@ -905,7 +879,7 @@ static void glock_work_func(struct work_struct *work)
 	struct gfs2_glock *gl = container_of(work, struct gfs2_glock, gl_work.work);
 	unsigned int drop_refs = 1;
 
-	if (test_and_clear_bit(GLF_REPLY_PENDING, &gl->gl_flags)) {
+	if (test_and_clear_bit(GLF_FINISH_XMOTE, &gl->gl_flags)) {
 		finish_xmote(gl);
 		drop_refs++;
 	}
@@ -1409,7 +1383,7 @@ int gfs2_glock_nq(struct gfs2_holder *gh)
 	add_to_queue(gh);
 	if (unlikely((LM_FLAG_NOEXP & gh->gh_flags) &&
 		     test_and_clear_bit(GLF_FROZEN, &gl->gl_flags))) {
-		set_bit(GLF_REPLY_PENDING, &gl->gl_flags);
+		set_bit(GLF_FINISH_XMOTE, &gl->gl_flags);
 		gl->gl_lockref.count++;
 		__gfs2_glock_queue_work(gl, 0);
 	}
@@ -1659,7 +1633,7 @@ void gfs2_glock_cb(struct gfs2_glock *gl, unsigned int mode)
 	    gl->gl_name.ln_type == LM_TYPE_INODE) {
 		if (time_before(now, holdtime))
 			delay = holdtime - now;
-		if (test_bit(GLF_REPLY_PENDING, &gl->gl_flags))
+		if (test_bit(GLF_FINISH_XMOTE, &gl->gl_flags))
 			delay = gl->gl_hold_time;
 	}
 	handle_callback(gl, mode, delay, true);
@@ -1709,22 +1683,47 @@ static int gfs2_should_freeze(const struct gfs2_glock *gl)
 void gfs2_glock_complete(struct gfs2_glock *gl, int ret)
 {
 	struct lm_lockstruct *ls = &gl->gl_name.ln_sbd->sd_lockstruct;
+	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
+	int held1, held2;
 
-	spin_lock(&gl->gl_lockref.lock);
+	held1 = (gl->gl_mode != LM_ST_UNLOCKED);
+	held2 = ((ret & LM_OUT_ST_MASK) != LM_ST_UNLOCKED);
+
+	if (held1 != held2) {
+		GLOCK_BUG_ON(gl, __lockref_is_dead(&gl->gl_lockref));
+		if (held2)
+			gl->gl_lockref.count++;
+		else
+			gl->gl_lockref.count--;
+	}
+	gl->gl_mode = ret & LM_OUT_ST_MASK;
+	gl->gl_tchange = jiffies;
 	gl->gl_reply = ret;
 
+	if (!sdp->sd_lockstruct.ls_ops->lm_lock) { /* lock_nolock */
+		finish_xmote(gl);
+		return;
+	}
+	/* lock_dlm */
 	if (unlikely(test_bit(DFL_BLOCK_LOCKS, &ls->ls_recover_flags))) {
 		if (gfs2_should_freeze(gl)) {
 			set_bit(GLF_FROZEN, &gl->gl_flags);
-			spin_unlock(&gl->gl_lockref.lock);
 			return;
 		}
 	}
 
 	gl->gl_lockref.count++;
-	set_bit(GLF_REPLY_PENDING, &gl->gl_flags);
+	set_bit(GLF_FINISH_XMOTE, &gl->gl_flags);
+	/*
+	 * Note that we cannot call the glock __state_machine here because dlm
+	 * calls this directly and can therefore call gdlm_put_lock if done on
+	 * the last reference. That causes it to call back into dlm_unlock
+	 * which can deadlock because the dlm_recoverd thread can hang on
+	 * flush_workqueue while the workqueue doing the dlm_unlock cannot
+	 * proceed because the lockspace is in recovery. Or, to put it more
+	 * simply, we have: dlm -> gfs2 -> dlm
+	 */
 	__gfs2_glock_queue_work(gl, 0);
-	spin_unlock(&gl->gl_lockref.lock);
 }
 
 static int glock_cmp(void *priv, struct list_head *a, struct list_head *b)
@@ -1933,7 +1932,7 @@ static void thaw_glock(struct gfs2_glock *gl)
 		gfs2_glock_put(gl);
 		return;
 	}
-	set_bit(GLF_REPLY_PENDING, &gl->gl_flags);
+	set_bit(GLF_FINISH_XMOTE, &gl->gl_flags);
 	gfs2_glock_queue_work(gl, 0);
 }
 
@@ -2102,7 +2101,7 @@ static const char *gflags2str(char *buf, const struct gfs2_glock *gl)
 		*p++ = 'f';
 	if (test_bit(GLF_INVALIDATE_IN_PROGRESS, gflags))
 		*p++ = 'i';
-	if (test_bit(GLF_REPLY_PENDING, gflags))
+	if (test_bit(GLF_FINISH_XMOTE, gflags))
 		*p++ = 'r';
 	if (test_bit(GLF_INITIAL, gflags))
 		*p++ = 'I';
