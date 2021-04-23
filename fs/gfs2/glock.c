@@ -501,7 +501,6 @@ static noinline void state_finish_xmote(struct gfs2_glock *gl)
 	struct gfs2_holder *gh;
 	int ret = gl->gl_reply;
 	unsigned mode = ret & LM_OUT_ST_MASK;
-	int rv;
 
 	trace_gfs2_glock_mode_change(gl, mode);
 	gh = find_first_waiter(gl);
@@ -549,9 +548,8 @@ static noinline void state_finish_xmote(struct gfs2_glock *gl)
 	if (test_and_clear_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags))
 		gfs2_demote_wake(gl);
 	if (mode != LM_ST_UNLOCKED) {
-		rv = do_promote(gl);
-		if (rv == 2)
-			return;
+		next_state(gl, GL_ST_PROMOTE);
+		return;
 	}
 out:
 	clear_bit(GLF_LOCK, &gl->gl_flags);
@@ -724,6 +722,33 @@ out:
 }
 
 /**
+ * state_do_promote - try to promote a glock
+ * @gl: The glock in question
+ *
+ * This state transitions to do_xmote state
+ */
+static noinline void state_do_promote(struct gfs2_glock *gl)
+{
+	struct gfs2_holder *gh;
+	int ret;
+
+	if (test_bit(GLF_DEMOTE, &gl->gl_flags))
+		gfs2_demote_wake(gl);
+	ret = do_promote(gl);
+	if (ret == 0) {
+		clear_bit(GLF_LOCK, &gl->gl_flags);
+		smp_mb__after_atomic();
+		return;
+	}
+	if (ret == 2)
+		return;
+	gh = find_first_waiter(gl);
+	if (!(gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB)))
+		do_error(gl, 0); /* Fail queued try locks */
+	next_state(gl, GL_ST_SYNCINVAL);
+}
+
+/**
  * __state_machine - the glock state machine
  * @gl: pointer to the glock we are transitioning
  * @new_state: The new state we need to execute
@@ -762,6 +787,10 @@ static void __state_machine(struct gfs2_glock *gl, int new_state)
 			state_demote(gl);
 			break;
 
+		case GL_ST_PROMOTE:
+			next_state(gl, GL_ST_IDLE);
+			state_do_promote(gl);
+			break;
 		}
 
 	} while (gl->gl_mch != GL_ST_IDLE);
@@ -811,9 +840,6 @@ static void run_queue(struct gfs2_glock *gl, const int nonblock)
 __releases(&gl->gl_lockref.lock)
 __acquires(&gl->gl_lockref.lock)
 {
-	struct gfs2_holder *gh = NULL;
-	int ret;
-
 	if (test_and_set_bit(GLF_LOCK, &gl->gl_flags))
 		return;
 
@@ -835,22 +861,10 @@ __acquires(&gl->gl_lockref.lock)
 		}
 		set_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags);
 		GLOCK_BUG_ON(gl, gl->gl_demote_mode == LM_ST_EXCLUSIVE);
+		__state_machine(gl, GL_ST_SYNCINVAL);
 	} else {
-		if (test_bit(GLF_DEMOTE, &gl->gl_flags))
-			gfs2_demote_wake(gl);
-		ret = do_promote(gl);
-		if (ret == 0) {
-			clear_bit(GLF_LOCK, &gl->gl_flags);
-			smp_mb__after_atomic();
-			return;
-		}
-		if (ret == 2)
-			return;
-		gh = find_first_waiter(gl);
-		if (!(gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB)))
-			do_error(gl, 0); /* Fail queued try locks */
+		__state_machine(gl, GL_ST_PROMOTE);
 	}
-	__state_machine(gl, GL_ST_SYNCINVAL);
 }
 
 void gfs2_inode_remember_delete(struct gfs2_glock *gl, u64 generation)

@@ -130,6 +130,7 @@ enum {
  * --------------------------------  -------------------- ---------------------
  * glock_work_func reply from dlm    GL_ST_IDLE           GL_ST_FINISH_XMOTE
  * run_queue non-promote case        GL_ST_IDLE           GL_ST_DEMOTE
+ * run_queue non-demote case         GL_ST_IDLE           GL_ST_PROMOTE
  *
  * finish_xmote completed            GL_ST_FINISH_XMOTE   GL_ST_IDLE
  * finish_xmote conversion deadlock  GL_ST_FINISH_XMOTE   GL_ST_SYNCINVAL
@@ -141,6 +142,8 @@ enum {
  * demote withdraw detected          GL_ST_DEMOTE         GL_ST_IDLE
  * demote error during go_sync       GL_ST_DEMOTE         GL_ST_IDLE
  *
+ * do_promote blocked holder case    GL_ST_PROMOTE        GL_ST_SYNCINVAL
+ * do_promote successful             GL_ST_PROMOTE        GL_ST_IDLE
  */
 
 enum gl_machine_states {
@@ -148,6 +151,7 @@ enum gl_machine_states {
 	GL_ST_FINISH_XMOTE = 1,	/* Promotion/demotion complete */
 	GL_ST_SYNCINVAL = 2,	/* Sync and/or invalidate */
 	GL_ST_DEMOTE = 3,	/* Formerly do_xmote */
+	GL_ST_PROMOTE = 4,	/* do_promote */
 };
 
 struct lm_lockops {
