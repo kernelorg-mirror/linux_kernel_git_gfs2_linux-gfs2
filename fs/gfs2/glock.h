@@ -129,8 +129,9 @@ enum {
  * Trigger                           Current State        Next State
  * --------------------------------  -------------------- ---------------------
  * glock_work_func reply from dlm    GL_ST_IDLE           GL_ST_FINISH_XMOTE
- * run_queue non-promote case        GL_ST_IDLE           GL_ST_DEMOTE
- * run_queue non-demote case         GL_ST_IDLE           GL_ST_PROMOTE
+ * glock_work_func business as usual GL_ST_IDLE           GL_ST_RUN_QUEUE
+ * gfs2_glock_nq business as usual   GL_ST_IDLE           GL_ST_RUN_Q_NONBLOCK
+ * gfs2_glock_finish_truncate        GL_ST_IDLE           GL_ST_RUN_Q_NONBLOCK
  *
  * finish_xmote completed            GL_ST_FINISH_XMOTE   GL_ST_IDLE
  * finish_xmote conversion deadlock  GL_ST_FINISH_XMOTE   GL_ST_SYNCINVAL
@@ -144,6 +145,10 @@ enum {
  *
  * do_promote blocked holder case    GL_ST_PROMOTE        GL_ST_SYNCINVAL
  * do_promote successful             GL_ST_PROMOTE        GL_ST_IDLE
+ *
+ * run_queue non-promote case        GL_ST_RUN_QUEUE      GL_ST_SYNCINVAL
+ * run_queue demote in progress      GL_ST_RUN_QUEUE      GL_ST_PROMOTE
+ * run_queue demote, requeue work    GL_ST_RUN_Q_NONBLOCK GL_ST_IDLE
  */
 
 enum gl_machine_states {
@@ -152,6 +157,8 @@ enum gl_machine_states {
 	GL_ST_SYNCINVAL = 2,	/* Sync and/or invalidate */
 	GL_ST_DEMOTE = 3,	/* Formerly do_xmote */
 	GL_ST_PROMOTE = 4,	/* do_promote */
+	GL_ST_RUN_QUEUE = 5,	/* run_queue */
+	GL_ST_RUN_Q_NONBLOCK = 6,	/* run_queue_nonblock */
 };
 
 struct lm_lockops {
