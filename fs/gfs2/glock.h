@@ -134,7 +134,13 @@ enum {
  * gfs2_glock_finish_truncate        GL_ST_IDLE           GL_ST_RUN_Q_NONBLOCK
  *
  * finish_xmote completed            GL_ST_FINISH_XMOTE   GL_ST_IDLE
- * finish_xmote conversion deadlock  GL_ST_FINISH_XMOTE   GL_ST_SYNCINVAL
+ * finish_xmote conversion deadlock  GL_ST_FINISH_XMOTE   GL_ST_XMOTE_DENIED
+ *
+ * xmote_denied but TRY lock         GL_ST_XMOTE_DENIED   GL_ST_IDLE
+ * xmote_denied regular lock         GL_ST_XMOTE_DENIED   GL_ST_SYNCINVAL
+ *
+ * finish_xmote conversion deadlock  GL_ST_FINISH_XMOTE   GL_ST_XMOTE_DENIED
+ * finish_xmote successful xmote     GL_ST_FINISH_XMOTE   GL_ST_IDLE
  *
  * demote reaction to dlm            GL_ST_SYNCINVAL      GL_ST_DEMOTE
  * demote with LOCK_NOLOCK           GL_ST_SYNCINVAL      GL_ST_DEMOTE
@@ -159,6 +165,7 @@ enum gl_machine_states {
 	GL_ST_PROMOTE = 4,	/* do_promote */
 	GL_ST_RUN_QUEUE = 5,	/* run_queue */
 	GL_ST_RUN_Q_NONBLOCK = 6,	/* run_queue_nonblock */
+	GL_ST_XMOTE_DENIED = 7,	/* xmote_denied */
 };
 
 struct lm_lockops {

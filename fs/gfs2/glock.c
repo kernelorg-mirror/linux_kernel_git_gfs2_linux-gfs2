@@ -491,12 +491,12 @@ static void gfs2_demote_wake(struct gfs2_glock *gl)
 }
 
 /**
- * state_finish_xmote - The lock manager replied to one of our lock requests
++ * state_xmote_denied - The DLM has rejected our lock request
  * @gl: The glock
  *
  */
 
-static noinline void state_finish_xmote(struct gfs2_glock *gl)
+static noinline void state_xmote_denied(struct gfs2_glock *gl)
 {
 	struct gfs2_holder *gh;
 	int ret = gl->gl_reply;
@@ -505,42 +505,60 @@ static noinline void state_finish_xmote(struct gfs2_glock *gl)
 	trace_gfs2_glock_mode_change(gl, mode);
 	gh = find_first_waiter(gl);
 
+	/* shorten our minimum hold time */
+	gl->gl_hold_time = max(gl->gl_hold_time - GL_GLOCK_HOLD_DECR,
+			       GL_GLOCK_MIN_HOLD);
+	if (gh && !test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags)) {
+		/* move to back of queue and try next entry */
+		if (ret & LM_OUT_CANCELED) {
+			if ((gh->gh_flags & LM_FLAG_PRIORITY) == 0)
+				list_move_tail(&gh->gh_list, &gl->gl_holders);
+			next_state(gl, GL_ST_SYNCINVAL);
+			goto out;
+		}
+		/* Some error or failed "try lock" - report it */
+		if ((ret & LM_OUT_ERROR) ||
+		    (gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB))) {
+			do_error(gl, ret);
+			goto out;
+		}
+	}
+	switch(mode) {
+		/* Unlocked due to conversion deadlock, try again */
+	case LM_ST_UNLOCKED:
+		next_state(gl, GL_ST_SYNCINVAL);
+		break;
+		/* Conversion fails, unlock and try again */
+	case LM_ST_SHARED:
+	case LM_ST_DEFERRED:
+		next_state(gl, GL_ST_SYNCINVAL);
+		break;
+	default: /* Everything else */
+		fs_err(gl->gl_name.ln_sbd, "requested %u got %u\n",
+		       gl->gl_req, mode);
+		GLOCK_BUG_ON(gl, 1);
+	}
+	return;
+out:
+	clear_bit(GLF_LOCK, &gl->gl_flags);
+}
+
+/**
+ * state_finish_xmote - The lock manager replied to one of our lock requests
+ * @gl: The glock
+ *
+ */
+
+static noinline void state_finish_xmote(struct gfs2_glock *gl)
+{
+	const struct gfs2_glock_operations *glops = gl->gl_ops;
+	int ret = gl->gl_reply;
+	unsigned mode = ret & LM_OUT_ST_MASK;
+	int rv;
+
 	/* Check for dlm mode != requested mode */
 	if (unlikely(mode != gl->gl_req)) {
-		/* shorten our minimum hold time */
-		gl->gl_hold_time = max(gl->gl_hold_time - GL_GLOCK_HOLD_DECR,
-				       GL_GLOCK_MIN_HOLD);
-		if (gh && !test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags)) {
-			/* move to back of queue and try next entry */
-			if (ret & LM_OUT_CANCELED) {
-				if ((gh->gh_flags & LM_FLAG_PRIORITY) == 0)
-					list_move_tail(&gh->gh_list,
-						       &gl->gl_holders);
-				next_state(gl, GL_ST_SYNCINVAL);
-				return;
-			}
-			/* Some error or failed "try lock" - report it */
-			if ((ret & LM_OUT_ERROR) ||
-			    (gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB))) {
-				do_error(gl, ret);
-				goto out;
-			}
-		}
-		switch(mode) {
-		/* Unlocked due to conversion deadlock, try again */
-		case LM_ST_UNLOCKED:
-			next_state(gl, GL_ST_SYNCINVAL);
-			break;
-		/* Conversion fails, unlock and try again */
-		case LM_ST_SHARED:
-		case LM_ST_DEFERRED:
-			next_state(gl, GL_ST_SYNCINVAL);
-			break;
-		default: /* Everything else */
-			fs_err(gl->gl_name.ln_sbd, "requested %u got %u\n",
-			       gl->gl_req, mode);
-			GLOCK_BUG_ON(gl, 1);
-		}
+		next_state(gl, GL_ST_XMOTE_DENIED);
 		return;
 	}
 
@@ -897,6 +915,11 @@ static int __state_machine(struct gfs2_glock *gl, int new_state)
 		case GL_ST_RUN_Q_NONBLOCK:
 			next_state(gl, GL_ST_IDLE);
 			state_run_queue(gl, true);
+			break;
+
+		case GL_ST_XMOTE_DENIED:
+			next_state(gl, GL_ST_IDLE);
+			state_xmote_denied(gl);
 			break;
 		}
 	} while (gl->gl_mch != GL_ST_IDLE);
