@@ -788,14 +788,12 @@ static inline struct gfs2_holder *find_first_holder(const struct gfs2_glock *gl)
  * @gl: The glock in question
  * @nonblock: True if we must not block in run_queue
  *
- * returns: 1 if work was requeued
  */
-static noinline int state_run_queue(struct gfs2_glock *gl, const int nonblock)
+static noinline void state_run_queue(struct gfs2_glock *gl, const int nonblock)
 __releases(&gl->gl_lockref.lock)
 __acquires(&gl->gl_lockref.lock)
 {
 	unsigned long delay = 0;
-	int work_requeued = 0;
 
 	if (!nonblock && test_bit(GLF_PENDING_DEMOTE, &gl->gl_flags) &&
 	    gl_mode(gl) != LM_ST_UNLOCKED &&
@@ -839,12 +837,11 @@ __acquires(&gl->gl_lockref.lock)
 out:
 	if (delay) {
 		/* Keep one glock reference for the work we requeue. */
-		work_requeued = 1;
 		if (gl->gl_name.ln_type != LM_TYPE_INODE)
 			delay = 0;
+		gl->gl_lockref.count++;
 		__gfs2_glock_queue_work(gl, delay);
 	}
-	return work_requeued;
 }
 
 /**
@@ -908,7 +905,7 @@ static int __state_machine(struct gfs2_glock *gl, int may_block)
 
 		case GL_ST_RUN_QUEUE:
 			next_state(gl, GL_ST_IDLE);
-			drop_refs -= state_run_queue(gl, false);
+			state_run_queue(gl, false);
 			break;
 
 		case GL_ST_RUN_Q_NONBLOCK:
