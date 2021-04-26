@@ -343,8 +343,7 @@ struct gfs2_glock {
 		     gl_req:2,		/* Last mode requested of dlm */
 		     unused:4,
 		     gl_reply:8,	/* Last reply from the dlm */
-		     gl_mch:8,		/* state machine state */
-		     gl_mchstrt:8;	/* state machine starting state */
+		     gl_mch:8;		/* state machine state */
 	u32 gl_mchhist;			/* state machine history */
 
 	unsigned long gl_demote_time; /* time of first demote request */

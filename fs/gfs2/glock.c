@@ -850,7 +850,7 @@ out:
 /**
  * __state_machine - the glock state machine
  * @gl: pointer to the glock we are transitioning
- * @new_state: The new state we need to execute
+ * @may_block: if ST_ALLOW_BLOCKING, we will allow the function to block
  *
  * This function handles state transitions for glocks.
  * When the state_machine is called, it's given a new state that needs to be
@@ -862,11 +862,10 @@ out:
  * Returns: 0 if glock still exists (and therefore needs its lockref unlocked.
  *          non-zero: the glock was destroyed, so do not dereference it.
  */
-static int __state_machine(struct gfs2_glock *gl, int new_state)
+static int __state_machine(struct gfs2_glock *gl, int may_block)
 {
-	int drop_refs = new_state == GL_ST_RUN_QUEUE ? 1 : 0;
+	int drop_refs = may_block == ST_ALLOW_BLOCKING ? 1 : 0;
 
-	gl->gl_mchstrt = new_state;
 	BUG_ON(!spin_is_locked(&gl->gl_lockref.lock));
 
 	do {
@@ -883,8 +882,8 @@ static int __state_machine(struct gfs2_glock *gl, int new_state)
 
 		switch (gl->gl_mch) {
 		case GL_ST_IDLE:
-			next_state(gl, new_state);
-			new_state = GL_ST_IDLE;
+			next_state(gl, may_block == ST_ALLOW_BLOCKING ?
+				   GL_ST_RUN_QUEUE : GL_ST_RUN_Q_NONBLOCK);
 			break;
 
 		case GL_ST_FINISH_XMOTE:
@@ -944,12 +943,12 @@ static int __state_machine(struct gfs2_glock *gl, int new_state)
  *
  * Just like __state_machine but it acquires the gl_lockref lock
  */
-static void state_machine(struct gfs2_glock *gl, int new_state)
+static void state_machine(struct gfs2_glock *gl, int may_block)
 __releases(&gl->gl_lockref.lock)
 __acquires(&gl->gl_lockref.lock)
 {
 	spin_lock(&gl->gl_lockref.lock);
-	if (!__state_machine(gl, new_state))
+	if (!__state_machine(gl, may_block))
 		spin_unlock(&gl->gl_lockref.lock);
 }
 
@@ -1081,7 +1080,7 @@ out:
 static void glock_work_func(struct work_struct *work)
 {
 	struct gfs2_glock *gl = container_of(work, struct gfs2_glock, gl_work.work);
-	state_machine(gl, GL_ST_RUN_QUEUE);
+	state_machine(gl, ST_ALLOW_BLOCKING);
 }
 
 static struct gfs2_glock *find_insert_glock(struct lm_lockname *name,
@@ -1551,7 +1550,7 @@ int gfs2_glock_nq(struct gfs2_holder *gh)
 		gl->gl_lockref.count++;
 		__gfs2_glock_queue_work(gl, 0);
 	}
-	__state_machine(gl, GL_ST_RUN_Q_NONBLOCK);
+	__state_machine(gl, ST_NONBLOCKING);
 	spin_unlock(&gl->gl_lockref.lock);
 
 	if (!(gh->gh_flags & GL_ASYNC))
@@ -1957,7 +1956,7 @@ add_back_to_lru:
 			request_unlock(gl);
 		WARN_ON(!test_and_clear_bit(GLF_LOCK, &gl->gl_flags));
 		spin_unlock(&lru_lock);
-		if (!__state_machine(gl, GL_ST_RUN_QUEUE))
+		if (!__state_machine(gl, ST_ALLOW_BLOCKING))
 			spin_unlock(&gl->gl_lockref.lock);
 		cond_resched();
 		spin_lock(&lru_lock);
@@ -2126,7 +2125,7 @@ static void clear_glock(struct gfs2_glock *gl)
 	spin_lock(&gl->gl_lockref.lock);
 	if (gl_mode(gl) != LM_ST_UNLOCKED)
 		request_unlock(gl);
-	if (!__state_machine(gl, GL_ST_RUN_QUEUE))
+	if (!__state_machine(gl, ST_ALLOW_BLOCKING))
 		spin_unlock(&gl->gl_lockref.lock);
 }
 
@@ -2182,7 +2181,7 @@ void gfs2_glock_finish_truncate(struct gfs2_inode *ip)
 
 	spin_lock(&gl->gl_lockref.lock);
 	clear_bit(GLF_LOCK, &gl->gl_flags);
-	__state_machine(gl, GL_ST_RUN_Q_NONBLOCK);
+	__state_machine(gl, ST_NONBLOCKING);
 	spin_unlock(&gl->gl_lockref.lock);
 }
 
@@ -2343,7 +2342,7 @@ void gfs2_dump_glock(struct seq_file *seq, struct gfs2_glock *gl, bool fsid)
 	if (!test_bit(GLF_DEMOTE, &gl->gl_flags))
 		dtime = 0;
 	gfs2_print_dbg(seq, "%sG:  s:%s n:%u/%llx f:%s d:%s/%llu a:%d "
-		       "v:%d r:%d m:%ld p:%lu S:%x/%x/%x\n",
+		       "v:%d r:%d m:%ld p:%lu S:%x/%x\n",
 		       fs_id_buf, mode2str(gl_mode(gl)),
 		       gl->gl_name.ln_type,
 		       (unsigned long long)gl->gl_name.ln_number,
@@ -2352,7 +2351,7 @@ void gfs2_dump_glock(struct seq_file *seq, struct gfs2_glock *gl, bool fsid)
 		       atomic_read(&gl->gl_ail_count),
 		       atomic_read(&gl->gl_revokes),
 		       (int)gl->gl_lockref.count, gl->gl_hold_time, nrpages,
-		       gl->gl_mchstrt, gl->gl_mch, gl->gl_mchhist);
+		       gl->gl_mch, gl->gl_mchhist);
 
 	list_for_each_entry(gh, &gl->gl_holders, gh_list)
 		dump_holder(seq, gh, fs_id_buf);

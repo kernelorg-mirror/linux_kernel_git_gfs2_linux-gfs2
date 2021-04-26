@@ -123,6 +123,9 @@ enum {
 #define GL_GLOCK_HOLD_INCR       (long)(HZ / 20)
 #define GL_GLOCK_HOLD_DECR       (long)(HZ / 40)
 
+#define ST_NONBLOCKING 0
+#define ST_ALLOW_BLOCKING 1
+
 /*
  * glock state machine transition table:
  *
