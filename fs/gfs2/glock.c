@@ -1414,14 +1414,13 @@ static void set_demote_mode(struct gfs2_glock *gl, unsigned int mode)
  * @gl: the glock
  * @mode: the mode the caller wants us to change to
  * @delay: zero to demote immediately; otherwise pending demote
- * @remote: true if this came from a different cluster node
  *
  * There are only two requests that we are going to see in actual
  * practise: LM_ST_SHARED and LM_ST_UNLOCKED
  */
 
 static void handle_callback(struct gfs2_glock *gl, unsigned int mode,
-			    unsigned long delay, bool remote)
+			    unsigned long delay)
 {
 	if (delay)
 		set_bit(GLF_PENDING_DEMOTE, &gl->gl_flags);
@@ -1429,8 +1428,9 @@ static void handle_callback(struct gfs2_glock *gl, unsigned int mode,
 		gfs2_set_demote(gl);
 	set_demote_mode(gl, mode);
 	if (gl->gl_ops->go_callback)
-		gl->gl_ops->go_callback(gl, remote);
-	trace_gfs2_demote_rq(gl, remote);
+		gl->gl_ops->go_callback(gl, true);
+	trace_gfs2_demote_rq(gl, true);
+	__gfs2_glock_queue_work(gl, delay);
 }
 
 /**
@@ -1824,8 +1824,7 @@ void gfs2_glock_cb(struct gfs2_glock *gl, unsigned int mode)
 		if (test_bit(GLF_FINISH_XMOTE, &gl->gl_flags))
 			delay = gl->gl_hold_time;
 	}
-	handle_callback(gl, mode, delay, true);
-	__gfs2_glock_queue_work(gl, delay);
+	handle_callback(gl, mode, delay);
 	spin_unlock(&gl->gl_lockref.lock);
 }
 
