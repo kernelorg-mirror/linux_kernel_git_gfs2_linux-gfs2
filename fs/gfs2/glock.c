@@ -2696,3 +2696,37 @@ void gfs2_unregister_debugfs(void)
 	debugfs_remove(gfs2_root);
 	gfs2_root = NULL;
 }
+/*
+
+Here is where Bob left off on 27 Apr 2021:
+There seems to be a problem somewhere near the patch
+"gfs2: split run_queue into blocking and non states"
+The problem manifested like this:
+
+ run fstests generic/294 at 2021-04-27 15:10:04
+ gfs2: fsid=sdc.0: fatal: filesystem consistency error - function = freeze_go_lock, file = glops.c, line = 611
+ gfs2: fsid=sdc.0: about to withdraw this file system
+ gfs2: fsid=sdc.0: original: gfs2_freeze_lock+0x29/0x60 [gfs2]
+ gfs2: fsid=sdc.0: pid: 1784471
+ gfs2: fsid=sdc.0: lock type: 1 req lock state : 3
+ gfs2: fsid=sdc.0: new: gfs2_freeze_lock+0x29/0x60 [gfs2]
+ gfs2: fsid=sdc.0: pid: 1784471
+ gfs2: fsid=sdc.0: lock type: 1 req lock state : 3
+[ 7751.558275] gfs2: fsid=sdc.0: G:  s:SH n:1/2 f:lqb t:SH d:EX/0 a:0 v:0 r:4 m:200 p:0
+[ 7751.559715] gfs2: fsid=sdc.0:  H: s:SH f:eEW e:0 p:1784471 [mount] gfs2_freeze_lock+0x29/0x60 [gfs2]
+[ 7751.561107] ------------[ cut here ]------------
+[ 7751.561784] kernel BUG at glock.c:1383!
+[ 7751.562804] invalid opcode: 0000 [#1] SMP PTI
+
+The resulting file system did NOT have an UNMOUNT log header at the
+wrap point. The freeze code should have written one out during its log_flush
+but for some reason, it was not there.
+That caused a consistency error, which led to withdraw.
+The consistency error was:
+		if (!(head.lh_flags & GFS2_LOG_HEAD_UNMOUNT))
+			gfs2_consist(sdp);
+Since the withdraw was flagged on the freeze glock, it caused the
+glock recursion error you see here. So we need to get to the bottom
+of why the UNMOUNT log header was never written.
+
+ */
