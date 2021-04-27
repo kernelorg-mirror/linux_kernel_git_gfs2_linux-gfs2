@@ -589,16 +589,17 @@ static int freeze_go_sync(struct gfs2_glock *gl)
 }
 
 /**
- * freeze_go_xmote_bh - After promoting/demoting the freeze glock
+ * freeze_go_lock - After promoting/demoting the freeze glock
  * @gl: the glock
  */
-static int freeze_go_xmote_bh(struct gfs2_glock *gl)
+static int freeze_go_lock(struct gfs2_holder *gh)
 {
+	struct gfs2_glock *gl = gh->gh_gl;
 	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
 	struct gfs2_inode *ip = GFS2_I(sdp->sd_jdesc->jd_inode);
 	struct gfs2_glock *j_gl = ip->i_gl;
 	struct gfs2_log_header_host head;
-	int error;
+	int error = 0;
 
 	if (test_bit(SDF_JOURNAL_LIVE, &sdp->sd_flags)) {
 		j_gl->gl_ops->go_inval(j_gl, DIO_METADATA);
@@ -615,7 +616,7 @@ static int freeze_go_xmote_bh(struct gfs2_glock *gl)
 			gfs2_log_pointers_init(sdp, head.lh_blkno);
 		}
 	}
-	return 0;
+	return error;
 }
 
 /**
@@ -753,7 +754,7 @@ const struct gfs2_glock_operations gfs2_rgrp_glops = {
 
 const struct gfs2_glock_operations gfs2_freeze_glops = {
 	.go_sync = freeze_go_sync,
-	.go_xmote_bh = freeze_go_xmote_bh,
+	.go_lock = freeze_go_lock,
 	.go_demote_ok = freeze_go_demote_ok,
 	.go_type = LM_TYPE_NONDISK,
 	.go_flags = GLOF_NONDISK,
