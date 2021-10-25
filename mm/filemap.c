@@ -3751,17 +3751,6 @@ ssize_t generic_perform_write(struct file *file,
 						iov_iter_count(i));
 
 again:
-		/*
-		 * Bring in the user page that we will copy from _first_.
-		 * Otherwise there's a nasty deadlock on copying from the
-		 * same page as we're writing to, without it being marked
-		 * up-to-date.
-		 */
-		if (unlikely(fault_in_iov_iter_readable(i, bytes))) {
-			status = -EFAULT;
-			break;
-		}
-
 		if (fatal_signal_pending(current)) {
 			status = -EINTR;
 			break;
@@ -3794,9 +3783,14 @@ again:
 			 * halfway through, might be a race with munmap,
 			 * might be severe memory pressure.
 			 */
-			if (copied)
+			if (copied) {
 				bytes = copied;
-			goto again;
+				goto again;
+			}
+			if (fault_in_iov_iter_readable(i, bytes) != bytes)
+				goto again;
+			status = -EFAULT;
+			break;
 		}
 		pos += status;
 		written += status;

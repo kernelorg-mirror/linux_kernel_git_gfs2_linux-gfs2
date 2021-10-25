@@ -744,17 +744,6 @@ again:
 		if (bytes > length)
 			bytes = length;
 
-		/*
-		 * Bring in the user page that we'll copy from _first_.
-		 * Otherwise there's a nasty deadlock on copying from the
-		 * same page as we're writing to, without it being marked
-		 * up-to-date.
-		 */
-		if (unlikely(fault_in_iov_iter_readable(i, bytes))) {
-			status = -EFAULT;
-			break;
-		}
-
 		status = iomap_write_begin(iter, pos, bytes, &page);
 		if (unlikely(status))
 			break;
@@ -777,9 +766,14 @@ again:
 			 * halfway through, might be a race with munmap,
 			 * might be severe memory pressure.
 			 */
-			if (copied)
+			if (copied) {
 				bytes = copied;
-			goto again;
+				goto again;
+			}
+			if (fault_in_iov_iter_readable(i, bytes) != bytes)
+				goto again;
+			status = -EFAULT;
+			break;
 		}
 		pos += status;
 		written += status;
