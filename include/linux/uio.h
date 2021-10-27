@@ -8,6 +8,7 @@
 #include <linux/kernel.h>
 #include <linux/thread_info.h>
 #include <uapi/linux/uio.h>
+#include <linux/mm.h>
 
 struct page;
 struct pipe_inode_info;
@@ -135,7 +136,21 @@ size_t copy_page_from_iter_atomic(struct page *page, unsigned offset,
 void iov_iter_advance(struct iov_iter *i, size_t bytes);
 void iov_iter_revert(struct iov_iter *i, size_t bytes);
 size_t fault_in_iov_iter_readable(const struct iov_iter *i, size_t bytes);
-size_t fault_in_iov_iter_writeable(const struct iov_iter *i, size_t bytes);
+size_t __fault_in_iov_iter_slow(const struct iov_iter *i, size_t bytes,
+				unsigned int flags);
+
+static inline size_t fault_in_iov_iter_slow_readable(const struct iov_iter *i,
+						     size_t bytes)
+{
+	return __fault_in_iov_iter_slow(i, bytes, 0);
+}
+
+static inline size_t fault_in_iov_iter_writeable(const struct iov_iter *i,
+						 size_t bytes)
+{
+	return __fault_in_iov_iter_slow(i, bytes, FOLL_WRITE);
+}
+
 size_t iov_iter_single_seg_count(const struct iov_iter *i);
 size_t copy_page_to_iter(struct page *page, size_t offset, size_t bytes,
 			 struct iov_iter *i);

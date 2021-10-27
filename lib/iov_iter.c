@@ -468,9 +468,10 @@ size_t fault_in_iov_iter_readable(const struct iov_iter *i, size_t size)
 EXPORT_SYMBOL(fault_in_iov_iter_readable);
 
 /*
- * fault_in_iov_iter_writeable - fault in iov iterator for writing
+ * __fault_in_iov_iter_slow - fault in iov iterator for reading/writing
  * @i: iterator
  * @size: maximum length
+ * @flags: FOLL_* flags (FOLL_WRITE for writing)
  *
  * Faults in the iterator using get_user_pages(), i.e., without triggering
  * hardware page faults.  This is primarily useful when we already know that
@@ -481,7 +482,8 @@ EXPORT_SYMBOL(fault_in_iov_iter_readable);
  *
  * Always returns 0 for non-user-space iterators.
  */
-size_t fault_in_iov_iter_writeable(const struct iov_iter *i, size_t size)
+size_t __fault_in_iov_iter_slow(const struct iov_iter *i, size_t size,
+				unsigned int flags)
 {
 	if (iter_is_iovec(i)) {
 		size_t count = min(size, iov_iter_count(i));
@@ -495,7 +497,7 @@ size_t fault_in_iov_iter_writeable(const struct iov_iter *i, size_t size)
 
 			if (unlikely(!len))
 				continue;
-			ret = fault_in_safe_writeable(p->iov_base + skip, len);
+			ret = __fault_in_slow(p->iov_base + skip, len, flags);
 			count -= len - ret;
 			if (ret)
 				break;
@@ -504,7 +506,7 @@ size_t fault_in_iov_iter_writeable(const struct iov_iter *i, size_t size)
 	}
 	return 0;
 }
-EXPORT_SYMBOL(fault_in_iov_iter_writeable);
+EXPORT_SYMBOL(__fault_in_iov_iter_slow);
 
 void iov_iter_init(struct iov_iter *i, unsigned int direction,
 			const struct iovec *iov, unsigned long nr_segs,

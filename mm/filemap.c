@@ -3787,7 +3787,7 @@ again:
 				bytes = copied;
 				goto again;
 			}
-			if (fault_in_iov_iter_readable(i, bytes) != bytes)
+			if (fault_in_iov_iter_slow_readable(i, bytes) != bytes)
 				goto again;
 			status = -EFAULT;
 			break;

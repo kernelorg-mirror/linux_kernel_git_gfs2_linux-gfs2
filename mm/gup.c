@@ -1694,9 +1694,10 @@ out:
 EXPORT_SYMBOL(fault_in_writeable);
 
 /*
- * fault_in_safe_writeable - fault in an address range for writing
+ * __fault_in_slow - fault in an address range for reading/writing
  * @uaddr: start of address range
  * @size: length of address range
+ * @flags: FOLL_* flags (FOLL_WRITE for writing)
  *
  * Faults in an address range using get_user_pages, i.e., without triggering
  * hardware page faults.  This is primarily useful when we already know that
@@ -1711,7 +1712,8 @@ EXPORT_SYMBOL(fault_in_writeable);
  * Returns the number of bytes not faulted in, like copy_to_user() and
  * copy_from_user().
  */
-size_t fault_in_safe_writeable(const char __user *uaddr, size_t size)
+size_t __fault_in_slow(const char __user *uaddr, size_t size,
+		       unsigned int flags)
 {
 	unsigned long start = (unsigned long)untagged_addr(uaddr);
 	unsigned long end, nstart, nend;
@@ -1743,7 +1745,7 @@ size_t fault_in_safe_writeable(const char __user *uaddr, size_t size)
 		nr_pages = (nend - nstart) / PAGE_SIZE;
 		ret = __get_user_pages_locked(mm, nstart, nr_pages,
 					      NULL, NULL, &locked,
-					      FOLL_TOUCH | FOLL_WRITE);
+					      FOLL_TOUCH | flags);
 		if (ret <= 0)
 			break;
 		nend = nstart + ret * PAGE_SIZE;
@@ -1754,7 +1756,7 @@ size_t fault_in_safe_writeable(const char __user *uaddr, size_t size)
 		return 0;
 	return size - min_t(size_t, nstart - start, size);
 }
-EXPORT_SYMBOL(fault_in_safe_writeable);
+EXPORT_SYMBOL(__fault_in_slow);
 
 /**
  * fault_in_readable - fault in userspace address range for reading
