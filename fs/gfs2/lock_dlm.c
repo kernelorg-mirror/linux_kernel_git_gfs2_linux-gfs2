@@ -279,6 +279,7 @@ static int gdlm_lock(struct gfs2_glock *gl, unsigned int req_state,
 	 * Submit the actual lock request.
 	 */
 
+	lkf |= DLM_LKF_IDLE;
 	return dlm_lock(ls->ls_dlm, req, &gl->gl_lksb, lkf, strname,
 			GDLM_STRNAME_BYTES - 1, 0, gdlm_ast, gl, gdlm_bast);
 }
@@ -312,7 +313,8 @@ static void gdlm_put_lock(struct gfs2_glock *gl)
 		return;
 	}
 
-	error = dlm_unlock(ls->ls_dlm, gl->gl_lksb.sb_lkid, DLM_LKF_VALBLK,
+	error = dlm_unlock(ls->ls_dlm, gl->gl_lksb.sb_lkid,
+			   DLM_LKF_VALBLK | DLM_LKF_IDLE,
 			   NULL, gl);
 	if (error) {
 		fs_err(sdp, "gdlm_unlock %x,%llx err=%d\n",
@@ -325,7 +327,9 @@ static void gdlm_put_lock(struct gfs2_glock *gl)
 static void gdlm_cancel(struct gfs2_glock *gl)
 {
 	struct lm_lockstruct *ls = &gl->gl_name.ln_sbd->sd_lockstruct;
-	dlm_unlock(ls->ls_dlm, gl->gl_lksb.sb_lkid, DLM_LKF_CANCEL, NULL, gl);
+	dlm_unlock(ls->ls_dlm, gl->gl_lksb.sb_lkid,
+		   DLM_LKF_CANCEL | DLM_LKF_IDLE,
+		   NULL, gl);
 }
 
 /*
@@ -506,7 +510,7 @@ static int sync_unlock(struct gfs2_sbd *sdp, struct dlm_lksb *lksb, char *name)
 	struct lm_lockstruct *ls = &sdp->sd_lockstruct;
 	int error;
 
-	error = dlm_unlock(ls->ls_dlm, lksb->sb_lkid, 0, lksb, ls);
+	error = dlm_unlock(ls->ls_dlm, lksb->sb_lkid, DLM_LKF_IDLE, lksb, ls);
 	if (error) {
 		fs_err(sdp, "%s lkid %x error %d\n",
 		       name, lksb->sb_lkid, error);
@@ -533,6 +537,7 @@ static int sync_lock(struct gfs2_sbd *sdp, int mode, uint32_t flags,
 	memset(strname, 0, GDLM_STRNAME_BYTES);
 	snprintf(strname, GDLM_STRNAME_BYTES, "%8x%16x", LM_TYPE_NONDISK, num);
 
+	flags |= DLM_LKF_IDLE;
 	error = dlm_lock(ls->ls_dlm, mode, lksb, flags,
 			 strname, GDLM_STRNAME_BYTES - 1,
 			 0, sync_wait_cb, ls, NULL);
