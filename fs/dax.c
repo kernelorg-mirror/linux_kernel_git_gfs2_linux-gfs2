@@ -226,8 +226,7 @@ static void *get_unlocked_entry(struct xa_state *xas, unsigned int order)
 	struct wait_exceptional_entry_queue ewait;
 	wait_queue_head_t *wq;
 
-	init_wait(&ewait.wait);
-	ewait.wait.func = wake_exceptional_entry_func;
+	init_wait_func(&ewait.wait, wake_exceptional_entry_func);
 
 	for (;;) {
 		entry = xas_find_conflict(xas);
@@ -259,8 +258,7 @@ static void wait_entry_unlocked(struct xa_state *xas, void *entry)
 	struct wait_exceptional_entry_queue ewait;
 	wait_queue_head_t *wq;
 
-	init_wait(&ewait.wait);
-	ewait.wait.func = wake_exceptional_entry_func;
+	init_wait_func(&ewait.wait, wake_exceptional_entry_func);
 
 	wq = dax_entry_waitqueue(xas, entry, &ewait.key);
 	/*

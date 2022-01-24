@@ -3156,8 +3156,7 @@ static bool __cancel_work_timer(struct work_struct *work, bool is_dwork)
 		if (unlikely(ret == -ENOENT)) {
 			struct cwt_wait cwait;
 
-			init_wait(&cwait.wait);
-			cwait.wait.func = cwt_wakefn;
+			init_wait_func(&cwait.wait, cwt_wakefn);
 			cwait.work = work;
 
 			prepare_to_wait_exclusive(&cancel_waitq, &cwait.wait,

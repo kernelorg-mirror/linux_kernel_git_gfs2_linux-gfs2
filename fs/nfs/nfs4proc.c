@@ -7313,8 +7313,7 @@ nfs4_retry_setlk(struct nfs4_state *state, int cmd, struct file_lock *request)
 	if (!test_bit(NFS_STATE_MAY_NOTIFY_LOCK, &state->flags))
 		return nfs4_retry_setlk_simple(state, cmd, request);
 
-	init_wait(&waiter.wait);
-	waiter.wait.func = nfs4_wake_lock_waiter;
+	init_wait_func(&waiter.wait, nfs4_wake_lock_waiter);
 	add_wait_queue(q, &waiter.wait);
 
 	do {

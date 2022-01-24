@@ -1111,8 +1111,7 @@ static struct gfs2_glock *find_insert_glock(struct lm_lockname *name,
 	struct gfs2_glock *gl;
 
 	wait.name = name;
-	init_wait(&wait.wait);
-	wait.wait.func = glock_wake_function;
+	init_wait_func(&wait.wait, glock_wake_function);
 
 again:
 	prepare_to_wait(wq, &wait.wait, TASK_UNINTERRUPTIBLE);
