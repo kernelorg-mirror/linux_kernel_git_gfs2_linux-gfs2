@@ -132,6 +132,10 @@
  * Unlock the lock even if it is converting or waiting or has sublocks.
  * Only really for use by the userland device.c code.
  *
+ * DLM_LKF_IDLE
+ *
+ * When the lock is busy, wait instead of returning -EBUSY.
+ *
  */
 
 #define DLM_LKF_NOQUEUE		0x00000001
@@ -153,6 +157,7 @@
 #define DLM_LKF_ALTCW		0x00010000
 #define DLM_LKF_FORCEUNLOCK	0x00020000
 #define DLM_LKF_TIMEOUT		0x00040000
+#define DLM_LKF_IDLE		0x00080000
 
 /*
  * Some return codes that are not in errno.h

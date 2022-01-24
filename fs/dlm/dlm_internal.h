@@ -265,6 +265,8 @@ struct dlm_lkb {
 
 	uint64_t		lkb_recover_seq; /* from ls_recover_seq */
 
+	wait_queue_head_t	lkb_idle;
+
 	char			*lkb_lvbptr;
 	struct dlm_lksb		*lkb_lksb;      /* caller's status block */
 	void			(*lkb_astfn) (void *astparam);

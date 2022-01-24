@@ -1199,6 +1199,7 @@ static int _create_lkb(struct dlm_ls *ls, struct dlm_lkb **lkb_ret,
 	INIT_LIST_HEAD(&lkb->lkb_cb_list);
 	mutex_init(&lkb->lkb_cb_mutex);
 	INIT_WORK(&lkb->lkb_cb_work, dlm_callback_work);
+	init_waitqueue_head(&lkb->lkb_idle);
 
 	idr_preload(GFP_NOFS);
 	spin_lock(&ls->ls_lkbidr_spin);
@@ -1335,6 +1336,7 @@ static void add_lkb(struct dlm_rsb *r, struct dlm_lkb *lkb, int status)
 			list_add_tail(&lkb->lkb_statequeue, &r->res_waitqueue);
 		break;
 	case DLM_LKSTS_GRANTED:
+		wake_up(&lkb->lkb_idle);
 		/* convention says granted locks kept in order of grmode */
 		lkb_add_ordered(&lkb->lkb_statequeue, &r->res_grantqueue,
 				lkb->lkb_grmode);
@@ -1586,6 +1588,7 @@ static int _remove_from_waiters(struct dlm_lkb *lkb, int mstype,
 			  lkb->lkb_id, mstype, lkb->lkb_wait_type);
 		lkb->lkb_wait_count--;
 		lkb->lkb_wait_type = 0;
+		wake_up(&lkb->lkb_idle);
 	}
 
 	DLM_ASSERT(lkb->lkb_wait_count, dlm_print_lkb(lkb););
@@ -1595,6 +1598,7 @@ static int _remove_from_waiters(struct dlm_lkb *lkb, int mstype,
 	if (!lkb->lkb_wait_count)
 		list_del_init(&lkb->lkb_wait_reply);
 	unhold_lkb(lkb);
+	wake_up(&lkb->lkb_idle);
 	return 0;
 }
 
@@ -2771,6 +2775,7 @@ static void process_lookup_list(struct dlm_rsb *r)
 
 	list_for_each_entry_safe(lkb, safe, &r->res_lookup, lkb_rsb_lookup) {
 		list_del_init(&lkb->lkb_rsb_lookup);
+		wake_up(&lkb->lkb_idle);
 		_request_lock(r, lkb);
 		schedule();
 	}
@@ -2805,6 +2810,7 @@ static void confirm_master(struct dlm_rsb *r, int error)
 			lkb = list_entry(r->res_lookup.next, struct dlm_lkb,
 					 lkb_rsb_lookup);
 			list_del_init(&lkb->lkb_rsb_lookup);
+			wake_up(&lkb->lkb_idle);
 			r->res_first_lkid = lkb->lkb_id;
 			_request_lock(r, lkb);
 		}
@@ -2974,6 +2980,7 @@ static int validate_unlock_args(struct dlm_lkb *lkb, struct dlm_args *args)
 		if (args->flags & (DLM_LKF_CANCEL | DLM_LKF_FORCEUNLOCK)) {
 			log_debug(ls, "unlock on rsb_lookup %x", lkb->lkb_id);
 			list_del_init(&lkb->lkb_rsb_lookup);
+			wake_up(&lkb->lkb_idle);
 			queue_cast(lkb->lkb_resource, lkb,
 				   args->flags & DLM_LKF_CANCEL ?
 				   -DLM_ECANCEL : -DLM_EUNLOCK);
@@ -3434,11 +3441,14 @@ int dlm_lock(dlm_lockspace_t *lockspace,
 	struct dlm_lkb *lkb;
 	struct dlm_args args;
 	int error, convert = flags & DLM_LKF_CONVERT;
+	struct wait_queue_entry wait;
+	bool wait_queued = false;
 
 	ls = dlm_find_lockspace_local(lockspace);
 	if (!ls)
 		return -EINVAL;
 
+ again:
 	dlm_lock_recovery(ls);
 
 	if (convert)
@@ -3456,6 +3466,13 @@ int dlm_lock(dlm_lockspace_t *lockspace,
 	if (error)
 		goto out_put;
 
+	if (flags & DLM_LKF_IDLE) {
+		hold_lkb(lkb);
+		init_wait_func(&wait, woken_wake_function);
+		add_wait_queue(&lkb->lkb_idle, &wait);
+		wait_queued = true;
+	}
+
 	if (convert)
 		error = convert_lock(ls, lkb, &args);
 	else
@@ -3472,6 +3489,16 @@ int dlm_lock(dlm_lockspace_t *lockspace,
 		error = 0;
  out:
 	dlm_unlock_recovery(ls);
+	if (wait_queued) {
+		if (error == -EBUSY)
+			wait_woken(&wait, TASK_UNINTERRUPTIBLE,
+				   MAX_SCHEDULE_TIMEOUT);
+		remove_wait_queue(&lkb->lkb_idle, &wait);
+		wait_queued = false;
+		__put_lkb(ls, lkb);
+		if (error == -EBUSY)
+			goto again;
+	}
 	dlm_put_lockspace(ls);
 	return error;
 }
@@ -3486,11 +3513,14 @@ int dlm_unlock(dlm_lockspace_t *lockspace,
 	struct dlm_lkb *lkb;
 	struct dlm_args args;
 	int error;
+	struct wait_queue_entry wait;
+	bool wait_queued = false;
 
 	ls = dlm_find_lockspace_local(lockspace);
 	if (!ls)
 		return -EINVAL;
 
+ again:
 	dlm_lock_recovery(ls);
 
 	error = find_lkb(ls, lkid, &lkb);
@@ -3502,6 +3532,13 @@ int dlm_unlock(dlm_lockspace_t *lockspace,
 	error = set_unlock_args(flags, astarg, &args);
 	if (error)
 		goto out_put;
+
+	if (flags & DLM_LKF_IDLE) {
+		hold_lkb(lkb);
+		init_wait_func(&wait, woken_wake_function);
+		add_wait_queue(&lkb->lkb_idle, &wait);
+		wait_queued = true;
+	}
 
 	if (flags & DLM_LKF_CANCEL)
 		error = cancel_lock(ls, lkb, &args);
@@ -3518,6 +3555,16 @@ int dlm_unlock(dlm_lockspace_t *lockspace,
 	dlm_put_lkb(lkb);
  out:
 	dlm_unlock_recovery(ls);
+	if (wait_queued) {
+		if (error == -EBUSY)
+			wait_woken(&wait, TASK_UNINTERRUPTIBLE,
+				   MAX_SCHEDULE_TIMEOUT);
+		remove_wait_queue(&lkb->lkb_idle, &wait);
+		wait_queued = false;
+		dlm_put_lkb(lkb);
+		if (error == -EBUSY)
+			goto again;
+	}
 	dlm_put_lockspace(ls);
 	return error;
 }
@@ -4617,6 +4664,7 @@ static int receive_request_reply(struct dlm_ls *ls, struct dlm_message *ms)
 		lkb->lkb_flags &= ~DLM_IFL_OVERLAP_CANCEL;
 		lkb->lkb_flags &= ~DLM_IFL_OVERLAP_UNLOCK;
 	}
+	wake_up(&lkb->lkb_idle);
  out:
 	unlock_rsb(r);
 	put_rsb(r);
@@ -5332,6 +5380,7 @@ int dlm_recover_waiters_post(struct dlm_ls *ls)
 		lkb->lkb_flags &= ~DLM_IFL_OVERLAP_CANCEL;
 		lkb->lkb_wait_type = 0;
 		lkb->lkb_wait_count = 0;
+		wake_up(&lkb->lkb_idle);
 		mutex_lock(&ls->ls_waiters_mutex);
 		list_del_init(&lkb->lkb_wait_reply);
 		mutex_unlock(&ls->ls_waiters_mutex);
