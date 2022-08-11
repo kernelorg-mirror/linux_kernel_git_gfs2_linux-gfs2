@@ -311,6 +311,35 @@ void gfs2_glock_put(struct gfs2_glock *gl)
 	__gfs2_glock_put(gl);
 }
 
+/*
+ * holders_compatible - see if a new gh may share a glock with a holding gh
+ * @held_gh: a holder who currently "holds" the glock
+ * @new_gh: another holder who wants to share with the held_gh
+ */
+static bool holders_compatible(struct gfs2_holder *held_gh,
+			       struct gfs2_holder *new_gh)
+{
+	switch(held_gh->gh_state) {
+	case LM_ST_EXCLUSIVE:
+		/*
+		 * Here we make a special exception to grant holders who agree
+		 * to share the EX lock with other holders who also have the
+		 * bit set. If the original holder has the LM_FLAG_NODE_SCOPE
+		 * bit set, we grant more holders with the bit set.
+		 */
+		return new_gh->gh_state == LM_ST_EXCLUSIVE &&
+		       (held_gh->gh_flags & LM_FLAG_NODE_SCOPE) &&
+		       (new_gh->gh_flags & LM_FLAG_NODE_SCOPE);
+
+	case LM_ST_SHARED:
+	case LM_ST_DEFERRED:
+		return new_gh->gh_state == held_gh->gh_state;
+
+	default:
+		return false;
+	}
+}
+
 /**
  * may_grant - check if it's ok to grant a new lock
  * @gl: The glock
@@ -331,27 +360,7 @@ static inline bool may_grant(struct gfs2_glock *gl,
 {
 	if (current_gh) {
 		GLOCK_BUG_ON(gl, !test_bit(HIF_HOLDER, &current_gh->gh_iflags));
-
-		switch(current_gh->gh_state) {
-		case LM_ST_EXCLUSIVE:
-			/*
-			 * Here we make a special exception to grant holders
-			 * who agree to share the EX lock with other holders
-			 * who also have the bit set. If the original holder
-			 * has the LM_FLAG_NODE_SCOPE bit set, we grant more
-			 * holders with the bit set.
-			 */
-			return gh->gh_state == LM_ST_EXCLUSIVE &&
-			       (current_gh->gh_flags & LM_FLAG_NODE_SCOPE) &&
-			       (gh->gh_flags & LM_FLAG_NODE_SCOPE);
-
-		case LM_ST_SHARED:
-		case LM_ST_DEFERRED:
-			return gh->gh_state == current_gh->gh_state;
-
-		default:
-			return false;
-		}
+		return holders_compatible(current_gh, gh);
 	}
 
 	if (gl->gl_state == gh->gh_state)
@@ -432,7 +441,7 @@ static void demote_incompat_holders(struct gfs2_glock *gl,
 		if (gh == current_gh)
 			continue;
 		if (test_bit(HIF_MAY_DEMOTE, &gh->gh_iflags) &&
-		    !may_grant(gl, current_gh, gh)) {
+		    !holders_compatible(current_gh, gh)) {
 			/*
 			 * We should not recurse into do_promote because
 			 * __gfs2_glock_dq only calls handle_callback,
