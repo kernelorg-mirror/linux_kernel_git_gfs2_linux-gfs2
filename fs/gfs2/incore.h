@@ -606,12 +606,7 @@ enum {
 	SDF_REMOTE_WITHDRAW	= 13, /* Performing remote recovery */
 	SDF_WITHDRAW_RECOVERY	= 14, /* Wait for journal recovery when we are
 					 withdrawing */
-};
-
-enum gfs2_freeze_state {
-	SFS_UNFROZEN		= 0,
-	SFS_STARTING_FREEZE	= 1,
-	SFS_FROZEN		= 2,
+	SDF_FROZEN		= 15,
 };
 
 #define GFS2_FSNAME_LEN		256
@@ -835,7 +830,6 @@ struct gfs2_sbd {
 
 	/* For quiescing the filesystem */
 	struct gfs2_holder sd_freeze_gh;
-	atomic_t sd_freeze_state;
 	struct mutex sd_freeze_mutex;
 
 	char sd_fsname[GFS2_FSNAME_LEN + 3 * sizeof(int) + 2];
