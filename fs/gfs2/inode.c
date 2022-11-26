@@ -1440,9 +1440,11 @@ static int gfs2_rename(struct inode *odir, struct dentry *odentry,
 		if (error)
 			goto out_gunlock;
 	}
-	error = gfs2_glock_async_wait(num_gh, ghs);
-	if (error)
+	error = gfs2_glock_async_wait(num_gh, ghs, 0);
+	if (error) {
+		gfs2_glock_dq_m(num_gh, ghs);
 		goto out_gunlock;
+	}
 
 	if (nip) {
 		/* Grab the resource group glock for unlink flag twiddling.
@@ -1679,9 +1681,11 @@ static int gfs2_exchange(struct inode *odir, struct dentry *odentry,
 			goto out_gunlock;
 	}
 
-	error = gfs2_glock_async_wait(num_gh, ghs);
-	if (error)
+	error = gfs2_glock_async_wait(num_gh, ghs, 0);
+	if (error) {
+		gfs2_glock_dq_m(num_gh, ghs);
 		goto out_gunlock;
+	}
 
 	error = -ENOENT;
 	if (oip->i_inode.i_nlink == 0 || nip->i_inode.i_nlink == 0)

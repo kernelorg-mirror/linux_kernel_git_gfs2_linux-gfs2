@@ -1361,24 +1361,26 @@ static int glocks_pending(unsigned int num_gh, struct gfs2_holder *ghs)
  * @num_gh: the number of holders in the array
  * @ghs: the glock holder array
  *
- * Returns: 0 on success, meaning all glocks have been granted and are held.
- *          -ESTALE if the request timed out, meaning all glocks were released,
- *          and the caller should retry the operation.
+ * Returns: 0 on success (meaning all glocks are held), -ESTALE if the request
+ *          has timed out, or else a different error number.
  */
 
-int gfs2_glock_async_wait(unsigned int num_gh, struct gfs2_holder *ghs)
+int gfs2_glock_async_wait(unsigned int num_gh, struct gfs2_holder *ghs,
+			  long timeout)
 {
 	struct gfs2_sbd *sdp = ghs[0].gh_gl->gl_name.ln_sbd;
-	int i, ret = 0, timeout = 0;
+	int i, ret = 0;
 	unsigned long start_time = jiffies;
 
 	might_sleep();
 	/*
-	 * Total up the (minimum hold time * 2) of all glocks and use that to
-	 * determine the max amount of time we should wait.
+	 * If no explicit timeout was given, total up the (minimum hold time *
+	 * 2) of all glocks and use that to determine the time we should wait.
 	 */
-	for (i = 0; i < num_gh; i++)
-		timeout += ghs[i].gh_gl->gl_hold_time << 1;
+	if (!timeout) {
+		for (i = 0; i < num_gh; i++)
+			timeout += ghs[i].gh_gl->gl_hold_time << 1;
+	}
 
 	if (!wait_event_timeout(sdp->sd_async_glock_wait,
 				!glocks_pending(num_gh, ghs), timeout)) {
@@ -1400,13 +1402,6 @@ int gfs2_glock_async_wait(unsigned int num_gh, struct gfs2_holder *ghs)
 	}
 
 out:
-	if (ret) {
-		for (i = 0; i < num_gh; i++) {
-			struct gfs2_holder *gh = &ghs[i];
-
-			gfs2_glock_dq(gh);
-		}
-	}
 	return ret;
 }
 
