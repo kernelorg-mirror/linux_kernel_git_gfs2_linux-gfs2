@@ -39,6 +39,7 @@
 #include <uapi/linux/mount.h>
 #include "internal.h"
 
+static int thaw_active_super_locked(struct super_block *sb);
 static int thaw_super_locked(struct super_block *sb);
 
 static LIST_HEAD(super_blocks);
@@ -509,6 +510,8 @@ void generic_shutdown_super(struct super_block *sb)
 
 		if (sop->put_super)
 			sop->put_super(sb);
+
+		thaw_active_super_locked(sb);
 
 		if (!list_empty(&sb->s_inodes)) {
 			printk("VFS: Busy inodes after unmount of %s. "
@@ -1676,7 +1679,7 @@ static void sb_freeze_unlock(struct super_block *sb, int level)
 }
 
 /**
- * freeze_super - lock the filesystem and force it into a consistent state
+ * freeze_active_super - lock the filesystem and force it into a consistent state
  * @sb: the super to lock
  *
  * Syncs the super to make sure the filesystem is consistent and calls the fs's
@@ -1708,11 +1711,10 @@ static void sb_freeze_unlock(struct super_block *sb, int level)
  *
  * sb->s_writers.frozen is protected by sb->s_umount.
  */
-int freeze_super(struct super_block *sb)
+int freeze_active_super(struct super_block *sb)
 {
 	int ret;
 
-	atomic_inc(&sb->s_active);
 	down_write(&sb->s_umount);
 	if (sb->s_writers.frozen != SB_UNFROZEN) {
 		deactivate_locked_super(sb);
@@ -1776,16 +1778,38 @@ int freeze_super(struct super_block *sb)
 	up_write(&sb->s_umount);
 	return 0;
 }
+EXPORT_SYMBOL(freeze_active_super);
+
+/**
+ * freeze_super - lock the filesystem and force it into a consistent state
+ * @sb: the super to lock
+ *
+ * Like freeze_active_super(), but takes an active reference on @sb so
+ * that it cannot be shut down while frozen.
+ */
+int freeze_super(struct super_block *sb)
+{
+	atomic_inc(&sb->s_active);
+	return freeze_active_super(sb);
+}
 EXPORT_SYMBOL(freeze_super);
 
-static int thaw_super_locked(struct super_block *sb)
+/**
+ * thaw_active_super_locked -- unlock filesystem
+ * @sb: the super to thaw
+ *
+ * Unlocks the filesystem and marks it writeable again after freeze_super().
+ *
+ * Like thaw_super(), but takes a locked super block, leaves it locked, and
+ * doesn't drop an active reference.  For use in ->put_super by filesystems
+ * that use freeze_active_super() and thaw_active_super().
+ */
+static int thaw_active_super_locked(struct super_block *sb)
 {
 	int error;
 
-	if (sb->s_writers.frozen != SB_FREEZE_COMPLETE) {
-		up_write(&sb->s_umount);
+	if (sb->s_writers.frozen != SB_FREEZE_COMPLETE)
 		return -EINVAL;
-	}
 
 	if (sb_rdonly(sb)) {
 		sb->s_writers.frozen = SB_UNFROZEN;
@@ -1800,7 +1824,6 @@ static int thaw_super_locked(struct super_block *sb)
 			printk(KERN_ERR
 				"VFS:Filesystem thaw failed\n");
 			lockdep_sb_freeze_release(sb);
-			up_write(&sb->s_umount);
 			return error;
 		}
 	}
@@ -1809,6 +1832,18 @@ static int thaw_super_locked(struct super_block *sb)
 	sb_freeze_unlock(sb, SB_FREEZE_FS);
 out:
 	wake_up(&sb->s_writers.wait_unfrozen);
+	return 0;
+}
+
+static int thaw_super_locked(struct super_block *sb)
+{
+	int ret;
+
+	ret = thaw_active_super_locked(sb);
+	if (ret) {
+		up_write(&sb->s_umount);
+		return ret;
+	}
 	deactivate_locked_super(sb);
 	return 0;
 }
@@ -1825,3 +1860,22 @@ int thaw_super(struct super_block *sb)
 	return thaw_super_locked(sb);
 }
 EXPORT_SYMBOL(thaw_super);
+
+/**
+ * thaw_active_super -- unlock filesystem
+ * @sb: the super to thaw
+ *
+ * Unlocks the filesystem and marks it writeable again after freeze_super().
+ *
+ * Like thaw_super(), but doesn't drop an active reference.
+ */
+int thaw_active_super(struct super_block *sb)
+{
+	int ret;
+
+	down_write(&sb->s_umount);
+	ret = thaw_active_super_locked(sb);
+	up_write(&sb->s_umount);
+	return ret;
+}
+EXPORT_SYMBOL(thaw_active_super);
