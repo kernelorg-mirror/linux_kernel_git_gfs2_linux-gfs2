@@ -393,6 +393,25 @@ static int grab_super(struct super_block *s) __releases(sb_lock)
 	return 0;
 }
 
+/**
+ * activate_super - try to grab an active reference on the superblock
+ * @sb: reference we are trying to grab
+ *
+ * Try to grab an active reference on the superblock to prevent filesystem
+ * shutdown.  Fails if the filesystem is already shutting down (see
+ * deactivate_locked_super()).
+ */
+bool activate_super(struct super_block *sb)
+{
+	if (atomic_inc_not_zero(&sb->s_active)) {
+		smp_mb__after_atomic();
+		BUG_ON(!(sb->s_flags & SB_BORN));
+		return true;
+	}
+	return false;
+}
+EXPORT_SYMBOL(activate_super);
+
 /*
  *	trylock_super - try to grab ->s_umount shared
  *	@sb: reference we are trying to grab
