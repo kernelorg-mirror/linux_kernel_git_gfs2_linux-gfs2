@@ -95,12 +95,13 @@ out_unlock:
 /**
  * gfs2_freeze_lock_shared - hold the freeze glock
  * @sdp: the superblock
+ * @flags: any additional flags needed by the caller
  */
-int gfs2_freeze_lock_shared(struct gfs2_sbd *sdp)
+int gfs2_freeze_lock_shared(struct gfs2_sbd *sdp, int flags)
 {
-	int flags = LM_FLAG_NOEXP | GL_EXACT;
 	int error;
 
+	flags |= LM_FLAG_NOEXP | GL_EXACT;
 	error = gfs2_glock_nq_init(sdp->sd_freeze_gl, LM_ST_SHARED, flags,
 				   &sdp->sd_freeze_gh);
 	if (error && error != GLR_TRYFAILED)

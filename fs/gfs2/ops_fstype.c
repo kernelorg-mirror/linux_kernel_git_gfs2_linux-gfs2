@@ -1264,7 +1264,7 @@ static int gfs2_fill_super(struct super_block *sb, struct fs_context *fc)
 		}
 	}
 
-	error = gfs2_freeze_lock_shared(sdp);
+	error = gfs2_freeze_lock_shared(sdp, 0);
 	if (error)
 		goto fail_per_node;
 
