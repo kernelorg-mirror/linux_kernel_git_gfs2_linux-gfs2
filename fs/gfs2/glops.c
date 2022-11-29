@@ -555,25 +555,13 @@ static void inode_go_dump(struct seq_file *seq, struct gfs2_glock *gl,
 static void freeze_go_callback(struct gfs2_glock *gl, bool remote)
 {
 	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
-	struct super_block *sb = sdp->sd_vfs;
 
 	if (!remote ||
 	    gl->gl_state != LM_ST_SHARED ||
 	    gl->gl_demote_state != LM_ST_UNLOCKED)
 		return;
 
-	/*
-	 * Try to get an active super block reference to prevent racing with
-	 * unmount (see trylock_super()).  But note that unmount isn't the only
-	 * place where a write lock on s_umount is taken, and we can fail here
-	 * because of things like remount as well.
-	 */
-	if (down_read_trylock(&sb->s_umount)) {
-		atomic_inc(&sb->s_active);
-		up_read(&sb->s_umount);
-		if (!queue_work(gfs2_freeze_wq, &sdp->sd_freeze_work))
-			deactivate_super(sb);
-	}
+	queue_work(gfs2_freeze_wq, &sdp->sd_freeze_work);
 }
 
 /**
@@ -588,7 +576,8 @@ static int freeze_go_xmote_bh(struct gfs2_glock *gl)
 	struct gfs2_log_header_host head;
 	int error;
 
-	if (test_bit(SDF_JOURNAL_LIVE, &sdp->sd_flags)) {
+	if (test_bit(SDF_JOURNAL_LIVE, &sdp->sd_flags) &&
+	    !test_bit(SDF_FROZEN, &sdp->sd_flags)) {
 		j_gl->gl_ops->go_inval(j_gl, DIO_METADATA);
 
 		error = gfs2_find_jhead(sdp->sd_jdesc, &head, false);

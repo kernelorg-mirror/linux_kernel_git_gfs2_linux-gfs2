@@ -533,7 +533,8 @@ out:
 
 void gfs2_make_fs_ro(struct gfs2_sbd *sdp)
 {
-	int log_write_allowed = test_bit(SDF_JOURNAL_LIVE, &sdp->sd_flags);
+	int log_write_allowed = test_bit(SDF_JOURNAL_LIVE, &sdp->sd_flags) &&
+				!test_bit(SDF_FROZEN, &sdp->sd_flags);
 
 	gfs2_flush_delete_work(sdp);
 	if (!log_write_allowed && current == sdp->sd_quotad_process)
@@ -606,6 +607,7 @@ restart:
 
 	/*  Release stuff  */
 
+	flush_work(&sdp->sd_freeze_work);
 	gfs2_freeze_unlock(&sdp->sd_freeze_gh);
 
 	iput(sdp->sd_jindex);
@@ -667,7 +669,10 @@ static int gfs2_freeze_locally(struct gfs2_sbd *sdp)
 	struct super_block *sb = sdp->sd_vfs;
 	int error;
 
-	error = freeze_super(sb);
+	if (!activate_super(sb))
+		return -EBUSY;
+	error = freeze_active_super(sb);
+	deactivate_super(sb);
 	if (error)
 		return error;
 
@@ -685,10 +690,22 @@ static int gfs2_enforce_thaw(struct gfs2_sbd *sdp)
 	struct super_block *sb = sdp->sd_vfs;
 	int error;
 
-	error = gfs2_freeze_lock_shared(sdp, 0);
+	error = gfs2_freeze_lock_shared(sdp, GL_ASYNC);
 	if (error)
 		goto fail;
-	error = thaw_super(sb);
+wait_longer:
+	error = gfs2_glock_async_wait(1, &sdp->sd_freeze_gh, 5 * HZ);
+	if (error && error != -ESTALE)
+		goto fail;
+	if (!activate_super(sb))
+		return -EBUSY;
+	if (error != 0) {
+		/* We don't have the lock, yet. */
+		deactivate_super(sb);
+		goto wait_longer;
+	}
+	error = thaw_active_super(sb);
+	deactivate_super(sb);
 	if (!error)
 		return 0;
 
@@ -701,7 +718,6 @@ fail:
 void gfs2_freeze_func(struct work_struct *work)
 {
 	struct gfs2_sbd *sdp = container_of(work, struct gfs2_sbd, sd_freeze_work);
-	struct super_block *sb = sdp->sd_vfs;
 	int error;
 
 	mutex_lock(&sdp->sd_freeze_mutex);
@@ -724,7 +740,6 @@ void gfs2_freeze_func(struct work_struct *work)
 
 out_unlock:
 	mutex_unlock(&sdp->sd_freeze_mutex);
-	deactivate_super(sb);
 out:
 	if (error)
 		fs_info(sdp, "GFS2: couldn't freeze filesystem: %d\n", error);
