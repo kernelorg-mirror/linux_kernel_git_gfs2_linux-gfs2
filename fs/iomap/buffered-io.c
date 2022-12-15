@@ -605,20 +605,20 @@ static int __iomap_write_begin(const struct iomap_iter *iter, loff_t pos,
 static struct folio *__iomap_get_folio(struct iomap_iter *iter, loff_t pos,
 		size_t len)
 {
-	const struct iomap_page_ops *page_ops = iter->iomap.page_ops;
+	const struct iomap_folio_ops *folio_ops = iter->iomap.folio_ops;
 
-	if (page_ops && page_ops->get_folio)
-		return page_ops->get_folio(iter, pos, len);
+	if (folio_ops && folio_ops->get_folio)
+		return folio_ops->get_folio(iter, pos, len);
 	return iomap_get_folio(iter, pos);
 }
 
 static void __iomap_put_folio(struct iomap_iter *iter, loff_t pos, size_t ret,
 		struct folio *folio)
 {
-	const struct iomap_page_ops *page_ops = iter->iomap.page_ops;
+	const struct iomap_folio_ops *folio_ops = iter->iomap.folio_ops;
 
-	if (page_ops && page_ops->put_folio) {
-		page_ops->put_folio(iter->inode, pos, ret, folio);
+	if (folio_ops && folio_ops->put_folio) {
+		folio_ops->put_folio(iter->inode, pos, ret, folio);
 	} else {
 		folio_unlock(folio);
 		folio_put(folio);
