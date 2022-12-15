@@ -62,29 +62,44 @@ xfs_iomap_inode_sequence(
 	return cookie | READ_ONCE(ip->i_df.if_seq);
 }
 
-/*
- * Check that the iomap passed to us is still valid for the given offset and
- * length.
- */
-static bool
-xfs_iomap_valid(
-	struct inode		*inode,
-	const struct iomap	*iomap)
+static struct folio *
+xfs_get_folio(
+	struct iomap_iter	*iter,
+	loff_t			pos,
+	unsigned		len)
 {
+	struct inode		*inode = iter->inode;
+	struct iomap		*iomap = &iter->iomap;
 	struct xfs_inode	*ip = XFS_I(inode);
+	struct folio		*folio;
 
+	folio = iomap_get_folio(iter, pos);
+	if (IS_ERR(folio))
+		return folio;
+
+	/*
+	 * Now that we have a locked folio, we need to check that the iomap we
+	 * have cached is not stale.  The inode extent mapping can change due to
+	 * concurrent IO in flight (e.g., IOMAP_UNWRITTEN state can change and
+	 * memory reclaim could have reclaimed a previously partially written
+	 * page at this index after IO completion before this write reaches
+	 * this file offset) and hence we could do the wrong thing here (zero a
+	 * page range incorrectly or fail to zero) and corrupt data.
+	 */
 	if (iomap->validity_cookie !=
 			xfs_iomap_inode_sequence(ip, iomap->flags)) {
 		trace_xfs_iomap_invalid(ip, iomap);
-		return false;
+		folio_unlock(folio);
+		folio_put(folio);
+		return ERR_PTR(-ESTALE);
 	}
 
 	XFS_ERRORTAG_DELAY(ip->i_mount, XFS_ERRTAG_WRITE_DELAY_MS);
-	return true;
+	return folio;
 }
 
 const struct iomap_page_ops xfs_iomap_page_ops = {
-	.iomap_valid		= xfs_iomap_valid,
+	.get_folio		= xfs_get_folio,
 };
 
 int

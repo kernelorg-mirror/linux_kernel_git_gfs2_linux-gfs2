@@ -134,29 +134,18 @@ static inline bool iomap_inline_data_valid(const struct iomap *iomap)
  * When get_folio succeeds, put_folio will always be called to do any
  * cleanup work necessary.  put_folio is responsible for unlocking and putting
  * @folio.
+ *
+ * When an iomap is created, the filesystem can store internal state (e.g., a
+ * sequence number) in iomap->validity_cookie.  The get_folio handler can use
+ * this validity cookie to detect when the iomap needs to be refreshed because
+ * it is no longer up to date.  In that case, the function should return
+ * ERR_PTR(-ESTALE) to retry the operation with a fresh mapping.
  */
 struct iomap_page_ops {
 	struct folio *(*get_folio)(struct iomap_iter *iter, loff_t pos,
 			unsigned len);
 	void (*put_folio)(struct inode *inode, loff_t pos, unsigned copied,
 			struct folio *folio);
-
-	/*
-	 * Check that the cached iomap still maps correctly to the filesystem's
-	 * internal extent map. FS internal extent maps can change while iomap
-	 * is iterating a cached iomap, so this hook allows iomap to detect that
-	 * the iomap needs to be refreshed during a long running write
-	 * operation.
-	 *
-	 * The filesystem can store internal state (e.g. a sequence number) in
-	 * iomap->validity_cookie when the iomap is first mapped to be able to
-	 * detect changes between mapping time and whenever .iomap_valid() is
-	 * called.
-	 *
-	 * This is called with the folio over the specified file position held
-	 * locked by the iomap code.
-	 */
-	bool (*iomap_valid)(struct inode *inode, const struct iomap *iomap);
 };
 
 /*
