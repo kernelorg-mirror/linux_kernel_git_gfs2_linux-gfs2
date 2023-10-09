@@ -16,7 +16,7 @@
 #include <linux/list_sort.h>
 #include <linux/blkdev.h>
 
-#include "bmap.h"
+#include "iomap.h"
 #include "dir.h"
 #include "gfs2.h"
 #include "incore.h"

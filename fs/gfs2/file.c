@@ -30,6 +30,7 @@
 
 #include "gfs2.h"
 #include "incore.h"
+#include "iomap.h"
 #include "bmap.h"
 #include "aops.h"
 #include "dir.h"

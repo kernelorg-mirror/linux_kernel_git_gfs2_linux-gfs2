@@ -43,27 +43,29 @@ static inline void gfs2_write_calc_reserv(const struct gfs2_inode *ip,
 	}
 }
 
-extern const struct iomap_ops gfs2_iomap_ops;
-extern const struct iomap_writeback_ops gfs2_writeback_ops;
+#define IOMAP_F_GFS2_BOUNDARY IOMAP_F_PRIVATE
 
-int gfs2_unstuff_dinode(struct gfs2_inode *ip);
-int gfs2_block_map(struct inode *inode, sector_t lblock,
-		   struct buffer_head *bh, int create);
-int gfs2_iomap_get(struct inode *inode, loff_t pos, loff_t length,
-		   struct iomap *iomap);
-int gfs2_iomap_alloc(struct inode *inode, loff_t pos, loff_t length,
-		     struct iomap *iomap);
-int gfs2_get_extent(struct inode *inode, u64 lblock, u64 *dblock,
-		    unsigned int *extlen);
-int gfs2_alloc_extent(struct inode *inode, u64 lblock, u64 *dblock,
-		      unsigned *extlen, bool *new);
+struct metapath {
+	struct buffer_head *mp_bh[GFS2_MAX_META_HEIGHT];
+	__u16 mp_list[GFS2_MAX_META_HEIGHT];
+	int mp_fheight; /* find_metapath height */
+	int mp_aheight; /* actual height (lookup height) */
+};
+
+void release_metapath(struct metapath *mp);
+
+int __gfs2_iomap_get(struct inode *inode, loff_t pos, loff_t length,
+		     unsigned flags, struct iomap *iomap,
+		     struct metapath *mp);
+int __gfs2_iomap_alloc(struct inode *inode, struct iomap *iomap,
+		       struct metapath *mp);
+
 int gfs2_setattr_size(struct inode *inode, u64 size);
 int gfs2_truncatei_resume(struct gfs2_inode *ip);
 int gfs2_file_dealloc(struct gfs2_inode *ip);
 int gfs2_write_alloc_required(struct gfs2_inode *ip, u64 offset,
 			      unsigned int len);
-int gfs2_map_journal_extents(struct gfs2_sbd *sdp, struct gfs2_jdesc *jd);
-void gfs2_free_journal_extents(struct gfs2_jdesc *jd);
+int punch_hole(struct gfs2_inode *ip, u64 offset, u64 length);
 int __gfs2_punch_hole(struct file *file, loff_t offset, loff_t length);
 
 #endif /* __BMAP_DOT_H__ */

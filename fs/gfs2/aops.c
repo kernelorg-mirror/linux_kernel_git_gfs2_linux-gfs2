@@ -23,7 +23,7 @@
 
 #include "gfs2.h"
 #include "incore.h"
-#include "bmap.h"
+#include "iomap.h"
 #include "glock.h"
 #include "inode.h"
 #include "log.h"

@@ -24,6 +24,7 @@
 #include "incore.h"
 #include "acl.h"
 #include "bmap.h"
+#include "iomap.h"
 #include "dir.h"
 #include "xattr.h"
 #include "glock.h"

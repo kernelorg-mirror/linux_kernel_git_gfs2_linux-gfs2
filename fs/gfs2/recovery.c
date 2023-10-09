@@ -16,7 +16,7 @@
 
 #include "gfs2.h"
 #include "incore.h"
-#include "bmap.h"
+#include "iomap.h"
 #include "glock.h"
 #include "glops.h"
 #include "log.h"

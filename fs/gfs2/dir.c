@@ -70,7 +70,7 @@
 #include "quota.h"
 #include "rgrp.h"
 #include "trans.h"
-#include "bmap.h"
+#include "iomap.h"
 #include "util.h"
 
 #define MAX_RA_BLOCKS 32 /* max read-ahead blocks */

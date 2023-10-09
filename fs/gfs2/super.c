@@ -28,6 +28,7 @@
 #include "gfs2.h"
 #include "incore.h"
 #include "bmap.h"
+#include "iomap.h"
 #include "dir.h"
 #include "glock.h"
 #include "glops.h"
