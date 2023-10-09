@@ -76,10 +76,10 @@ void gfs2_remove_from_ail(struct gfs2_bufdata *bd);
 bool gfs2_log_is_empty(struct gfs2_sbd *sdp);
 void gfs2_log_release_revokes(struct gfs2_sbd *sdp, unsigned int revokes);
 void gfs2_log_release(struct gfs2_sbd *sdp, unsigned int blks);
-bool gfs2_log_try_reserve(struct gfs2_sbd *sdp, struct gfs2_trans *tr,
-			  unsigned int *extra_revokes);
-void gfs2_log_reserve(struct gfs2_sbd *sdp, struct gfs2_trans *tr,
-		      unsigned int *extra_revokes);
+bool gfs2_log_try_reserve(struct gfs2_sbd *sdp, unsigned int blks,
+			  unsigned int revokes, unsigned int *extra_revokes);
+void gfs2_log_reserve(struct gfs2_sbd *sdp, unsigned int blks,
+		      unsigned int revokes, unsigned int *extra_revokes);
 void gfs2_write_log_header(struct gfs2_sbd *sdp, struct gfs2_jdesc *jd,
 			   u64 seq, u32 tail, u32 lblock, u32 flags,
 			   blk_opf_t op_flags);

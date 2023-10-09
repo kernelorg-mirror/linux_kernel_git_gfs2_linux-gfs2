@@ -559,18 +559,17 @@ reserved:
 /**
  * gfs2_log_try_reserve - Try to make a log reservation
  * @sdp: The GFS2 superblock
- * @tr: The transaction
+ * @blks: The number of blocks to reserve
+ * @revokes: The number of revokes to reserve
  * @extra_revokes: The number of additional revokes reserved (output)
  *
  * This is similar to gfs2_log_reserve, but sdp->sd_log_flush_lock must be
  * held for correct revoke accounting.
  */
 
-bool gfs2_log_try_reserve(struct gfs2_sbd *sdp, struct gfs2_trans *tr,
-			  unsigned int *extra_revokes)
+bool gfs2_log_try_reserve(struct gfs2_sbd *sdp, unsigned int blks,
+			  unsigned int revokes, unsigned int *extra_revokes)
 {
-	unsigned int blks = tr->tr_reserved;
-	unsigned int revokes = tr->tr_revokes;
 	unsigned int revoke_blks = 0;
 
 	*extra_revokes = 0;
@@ -591,17 +590,16 @@ bool gfs2_log_try_reserve(struct gfs2_sbd *sdp, struct gfs2_trans *tr,
 /**
  * gfs2_log_reserve - Make a log reservation
  * @sdp: The GFS2 superblock
- * @tr: The transaction
+ * @blks: The number of blocks to reserve
+ * @revokes: The number of revokes to reserve
  * @extra_revokes: The number of additional revokes reserved (output)
  *
  * sdp->sd_log_flush_lock must not be held.
  */
 
-void gfs2_log_reserve(struct gfs2_sbd *sdp, struct gfs2_trans *tr,
-		      unsigned int *extra_revokes)
+void gfs2_log_reserve(struct gfs2_sbd *sdp, unsigned int blks,
+		      unsigned int revokes, unsigned int *extra_revokes)
 {
-	unsigned int blks = tr->tr_reserved;
-	unsigned int revokes = tr->tr_revokes;
 	unsigned int revoke_blks;
 
 	*extra_revokes = 0;

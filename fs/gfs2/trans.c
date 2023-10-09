@@ -85,10 +85,11 @@ int __gfs2_trans_begin(struct gfs2_trans *tr, struct gfs2_sbd *sdp,
 	 */
 
 	down_read(&sdp->sd_log_flush_lock);
-	if (gfs2_log_try_reserve(sdp, tr, &extra_revokes))
+	if (gfs2_log_try_reserve(sdp, tr->tr_reserved, tr->tr_revokes,
+				 &extra_revokes))
 		goto reserved;
 	up_read(&sdp->sd_log_flush_lock);
-	gfs2_log_reserve(sdp, tr, &extra_revokes);
+	gfs2_log_reserve(sdp, tr->tr_reserved, tr->tr_revokes, &extra_revokes);
 	down_read(&sdp->sd_log_flush_lock);
 
 reserved:
@@ -119,6 +120,38 @@ int gfs2_trans_begin(struct gfs2_sbd *sdp, unsigned int blocks,
 	if (error)
 		kmem_cache_free(gfs2_trans_cachep, tr);
 	return error;
+}
+
+/**
+ * gfs2_trans_grow - Reserve additional blocks and revokes
+ * @sdp: The superblock
+ * @blks: The number of additional blocks to reserve
+ * @revokes: The number of additional revokes to reserve
+ *
+ * Return: True if the additional reservations could be made.
+ */
+bool gfs2_trans_grow(struct gfs2_sbd *sdp, unsigned int blks,
+		     unsigned int revokes)
+{
+	struct gfs2_trans *tr = current->journal_info;
+	unsigned int extra_revokes;
+
+	if (!tr)
+		return false;
+	blks -= min(blks, tr->tr_blocks -
+			  tr->tr_num_buf_new -
+			  tr->tr_num_databuf_new);
+	revokes -= min(revokes, tr->tr_revokes -
+				tr->tr_num_revoke);
+	if (blks || revokes) {
+		if (!gfs2_log_try_reserve(sdp, blks, revokes,
+					  &extra_revokes))
+			return false;
+		tr->tr_blocks += blks;
+		tr->tr_revokes += revokes;
+		gfs2_log_release_revokes(sdp, extra_revokes);
+	}
+	return true;
 }
 
 void gfs2_trans_end(struct gfs2_sbd *sdp)

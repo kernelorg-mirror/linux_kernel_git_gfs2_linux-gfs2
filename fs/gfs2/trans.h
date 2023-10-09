@@ -39,7 +39,8 @@ int __gfs2_trans_begin(struct gfs2_trans *tr, struct gfs2_sbd *sdp,
 		       unsigned long ip);
 int gfs2_trans_begin(struct gfs2_sbd *sdp, unsigned int blocks,
 		     unsigned int revokes);
-
+bool gfs2_trans_grow(struct gfs2_sbd *sdp, unsigned int blocks,
+		     unsigned int revokes);
 void gfs2_trans_end(struct gfs2_sbd *sdp);
 void gfs2_trans_add_data(struct gfs2_glock *gl, struct buffer_head *bh);
 void gfs2_trans_add_meta(struct gfs2_glock *gl, struct buffer_head *bh);
