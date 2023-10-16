@@ -483,18 +483,22 @@ static inline unsigned int gfs2_extent_length(struct buffer_head *bh, __be64 *pt
 	return ptr - first;
 }
 
-enum walker_status { WALK_STOP, WALK_FOLLOW, WALK_CONTINUE };
+#define WALK_STOP 0
+#define WALK_FOLLOW 1
+#define WALK_CONTINUE 2
 
 /*
  * gfs2_metadata_walker - walk an indirect block
  * @mp: Metapath to indirect block
  * @ptrs: Number of pointers to look at
+ * @data: Data passed through from caller
  *
  * When returning WALK_FOLLOW, the walker must update @mp to point at the right
  * indirect block to follow.
  */
-typedef enum walker_status (*gfs2_metadata_walker)(struct metapath *mp,
-						   unsigned int ptrs);
+typedef int (*gfs2_metadata_walker)(struct metapath *mp,
+				    unsigned int ptrs,
+				    void *data);
 
 /*
  * gfs2_walk_metadata - walk a tree of indirect blocks
@@ -503,12 +507,12 @@ typedef enum walker_status (*gfs2_metadata_walker)(struct metapath *mp,
  * @max_len: Maximum number of blocks to walk
  * @walker: Called during the walk
  *
- * Returns 1 if the walk was stopped by @walker, 0 if we went past @max_len or
- * past the end of metadata, and a negative error code otherwise.
+ * Returns a negative value if an error occurred or the @walker returned a
+ * negative value, or 0 if the @walker returned %WALK_STOP or we went past
+ * @max_len or past the end of the metadata tree.
  */
-
 static int gfs2_walk_metadata(struct inode *inode, struct metapath *mp,
-		u64 max_len, gfs2_metadata_walker walker)
+		u64 max_len, gfs2_metadata_walker walker, void *data)
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
@@ -529,7 +533,6 @@ static int gfs2_walk_metadata(struct inode *inode, struct metapath *mp,
 
 	for (;;) {
 		u16 start = mp->mp_list[hgt];
-		enum walker_status status;
 		unsigned int ptrs;
 		u64 len;
 
@@ -538,10 +541,10 @@ static int gfs2_walk_metadata(struct inode *inode, struct metapath *mp,
 		len = ptrs * factor;
 		if (len > max_len)
 			ptrs = DIV_ROUND_UP_ULL(max_len, factor);
-		status = walker(mp, ptrs);
-		switch (status) {
+		ret = walker(mp, ptrs, data);
+		switch (ret) {
 		case WALK_STOP:
-			return 1;
+			return 0;
 		case WALK_FOLLOW:
 			BUG_ON(mp->mp_aheight == mp->mp_fheight);
 			ptrs = mp->mp_list[hgt] - start;
@@ -549,11 +552,14 @@ static int gfs2_walk_metadata(struct inode *inode, struct metapath *mp,
 			break;
 		case WALK_CONTINUE:
 			break;
+		default:
+			BUG_ON(ret >= 0);
+			return ret;
 		}
 		if (len >= max_len)
 			break;
 		max_len -= len;
-		if (status == WALK_FOLLOW)
+		if (ret == WALK_FOLLOW)
 			goto fill_up_metapath;
 
 lower_metapath:
@@ -588,9 +594,10 @@ fill_up_metapath:
 	return 0;
 }
 
-static enum walker_status gfs2_hole_walker(struct metapath *mp,
-					   unsigned int ptrs)
+static int
+gfs2_hole_walker(struct metapath *mp, unsigned int ptrs, void *data)
 {
+	bool *stopped = data;
 	const __be64 *start, *ptr, *end;
 	unsigned int hgt;
 
@@ -601,8 +608,10 @@ static enum walker_status gfs2_hole_walker(struct metapath *mp,
 	for (ptr = start; ptr < end; ptr++) {
 		if (*ptr) {
 			mp->mp_list[hgt] += ptr - start;
-			if (mp->mp_aheight == mp->mp_fheight)
+			if (mp->mp_aheight == mp->mp_fheight) {
+				*stopped = true;
 				return WALK_STOP;
+			}
 			return WALK_FOLLOW;
 		}
 	}
@@ -626,14 +635,16 @@ static int gfs2_hole_size(struct inode *inode, sector_t lblock, u64 len,
 {
 	struct metapath clone;
 	u64 hole_size;
+	bool stopped = false;
 	int ret;
 
 	clone_metapath(&clone, mp);
-	ret = gfs2_walk_metadata(inode, &clone, len, gfs2_hole_walker);
-	if (ret < 0)
+	ret = gfs2_walk_metadata(inode, &clone, len,
+				 gfs2_hole_walker, &stopped);
+	if (ret)
 		goto out;
 
-	if (ret == 1)
+	if (stopped)
 		hole_size = metapath_to_block(GFS2_SB(inode), &clone) - lblock;
 	else
 		hole_size = len;
