@@ -1210,6 +1210,44 @@ hole_found:
 }
 
 static int
+gfs2_grow_height(struct gfs2_inode *ip, struct metapath *mp,
+		 struct gfs2_alloc_parms *ap)
+{
+	struct buffer_head *dibh = metapath_dibh(mp);
+	struct gfs2_dinode *dinode = (void *)dibh->b_data;
+	__be64 *ptr = (void *)(dinode + 1);
+	struct gfs2_glock *gl = ip->i_gl;
+	struct buffer_head *bh;
+	u64 block = 0;
+	int ret;
+
+	if (!ap->count) {
+		ret = gfs2_alloc_blocks(ip, ap);
+		if (ret)
+			goto out;
+	}
+	block = ap->start++;
+	ap->count--;
+
+	gfs2_trans_remove_revoke(GFS2_SB(&ip->i_inode), block, 1);
+	bh = gfs2_meta_new(gl, block);
+	gfs2_trans_add_meta(gl, bh);
+	gfs2_metatype_set(bh, GFS2_METATYPE_IN, GFS2_FORMAT_IN);
+	gfs2_buffer_copy_tail(bh, sizeof(struct gfs2_meta_header),
+			      dibh, sizeof(struct gfs2_dinode));
+	gfs2_trans_add_meta(gl, dibh);
+	gfs2_add_inode_blocks(&ip->i_inode, 1);
+	ip->i_height++;
+	dinode->di_height = cpu_to_be16(ip->i_height);
+	gfs2_buffer_clear_tail(dibh, sizeof(struct gfs2_dinode));
+	*ptr = cpu_to_be64(block);
+
+out:
+	brelse(dibh);
+	return ret;
+}
+
+static int
 gfs2_iomap_write_alloc(struct inode *inode,
 		       unsigned flags, struct iomap *iomap,
 		       struct metapath *mp)
