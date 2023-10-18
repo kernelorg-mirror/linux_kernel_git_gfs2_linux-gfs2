@@ -912,7 +912,7 @@ unstuff:
 	iomap->length = len << inode->i_blkbits;
 
 	height = ip->i_height;
-	while ((lblock + 1) * sdp->sd_sb.sb_bsize > sdp->sd_heightsize[height])
+	while ((lblock_stop + 1) * sdp->sd_sb.sb_bsize > sdp->sd_heightsize[height])
 		height++;
 	find_metapath(sdp, lblock, mp, height);
 	if (height > ip->i_height || gfs2_is_stuffed(ip))
