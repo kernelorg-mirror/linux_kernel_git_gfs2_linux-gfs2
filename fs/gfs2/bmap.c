@@ -35,9 +35,10 @@
  */
 struct metapath {
 	struct buffer_head *mp_bh[GFS2_MAX_META_HEIGHT];
-	__u16 mp_list[GFS2_MAX_META_HEIGHT];
 	int mp_fheight; /* find_metapath height */
 	int mp_aheight; /* actual height (lookup height) */
+	__u16 mp_list[GFS2_MAX_META_HEIGHT];
+	__u16 mp_owned_bhs;
 };
 
 static int punch_hole(struct gfs2_inode *ip, u64 offset, u64 length);
@@ -284,11 +285,8 @@ static inline const __be64 *metaend(unsigned int height, const struct metapath *
 
 static void clone_metapath(struct metapath *clone, struct metapath *mp)
 {
-	unsigned int hgt;
-
 	*clone = *mp;
-	for (hgt = 0; hgt < mp->mp_aheight; hgt++)
-		get_bh(clone->mp_bh[hgt]);
+	clone->mp_owned_bhs = 0;
 }
 
 static void gfs2_metapath_ra(struct gfs2_glock *gl, __be64 *start, __be64 *end)
@@ -315,6 +313,23 @@ static void gfs2_metapath_ra(struct gfs2_glock *gl, __be64 *start, __be64 *end)
 	}
 }
 
+static inline void
+metapath_set(struct metapath *mp, unsigned int height,
+	     struct buffer_head *bh)
+{
+	mp->mp_bh[height] = bh;
+	mp->mp_owned_bhs |= BIT(height);
+}
+
+static inline void
+metapath_clear(struct metapath *mp, unsigned int height)
+{
+	if (mp->mp_owned_bhs & BIT(height))
+		brelse(mp->mp_bh[height]);
+	mp->mp_bh[height] = NULL;
+	mp->mp_owned_bhs &= ~BIT(height);
+}
+
 /*
  * init_metapath - initialize a metapath
  * @mp: The metapath
@@ -330,7 +345,7 @@ init_metapath(struct metapath *mp, struct inode *inode)
 	memset(mp, 0, sizeof(*mp));
 	ret = gfs2_meta_inode_buffer(ip, &dibh);
 	if (!ret)
-		mp->mp_bh[0] = dibh;
+		metapath_set(mp, 0, dibh);
 	mp->mp_aheight = gfs2_is_stuffed(ip) ? 0 : 1;
 	return ret;
 }
@@ -347,13 +362,15 @@ static int __fillup_metapath(struct gfs2_inode *ip, struct metapath *mp,
 	for (; x < h; x++) {
 		__be64 *ptr = metapointer(x, mp);
 		u64 dblock = be64_to_cpu(*ptr);
+		struct buffer_head *bh;
 		int ret;
 
 		if (!dblock)
 			break;
-		ret = gfs2_meta_buffer(ip, GFS2_METATYPE_IN, dblock, &mp->mp_bh[x + 1]);
+		ret = gfs2_meta_buffer(ip, GFS2_METATYPE_IN, dblock, &bh);
 		if (ret)
 			return ret;
+		metapath_set(mp, x + 1, bh);
 	}
 	mp->mp_aheight = x + 1;
 	return 0;
@@ -425,14 +442,18 @@ static sector_t metapath_to_block(struct gfs2_sbd *sdp, struct metapath *mp)
 
 static void release_metapath(struct metapath *mp)
 {
-	int i;
+	struct buffer_head **bh = mp->mp_bh;
+	unsigned int owned_bhs = mp->mp_owned_bhs;
 
-	for (i = 0; i < GFS2_MAX_META_HEIGHT; i++) {
-		if (mp->mp_bh[i] == NULL)
-			break;
-		brelse(mp->mp_bh[i]);
-		mp->mp_bh[i] = NULL;
+	while (owned_bhs) {
+		if (owned_bhs & 1) {
+			brelse(*bh);
+			*bh = NULL;
+		}
+		bh++;
+		owned_bhs <<= 1;
 	}
+	mp->mp_owned_bhs = 0;
 }
 
 /**
@@ -537,8 +558,7 @@ static int gfs2_walk_metadata(struct inode *inode, struct metapath *mp,
 
 lower_metapath:
 		/* Decrease height of metapath. */
-		brelse(mp->mp_bh[hgt]);
-		mp->mp_bh[hgt] = NULL;
+		metapath_clear(mp, hgt);
 		mp->mp_list[hgt] = 0;
 		if (!hgt)
 			break;
@@ -632,9 +652,12 @@ static inline void gfs2_indirect_init(struct metapath *mp,
 	__be64 *ptr = (__be64 *)(mp->mp_bh[i - 1]->b_data +
 		       ((i > 1) ? sizeof(struct gfs2_meta_header) :
 				 sizeof(struct gfs2_dinode)));
+	struct buffer_head *bh;
+
 	BUG_ON(i < 1);
 	BUG_ON(mp->mp_bh[i] != NULL);
-	mp->mp_bh[i] = gfs2_meta_new(gl, bn);
+	bh = gfs2_meta_new(gl, bn);
+	metapath_set(mp, i, bh);
 	gfs2_trans_add_meta(gl, mp->mp_bh[i]);
 	gfs2_metatype_set(mp->mp_bh[i], GFS2_METATYPE_IN, GFS2_FORMAT_IN);
 	gfs2_buffer_clear_tail(mp->mp_bh[i], sizeof(struct gfs2_meta_header));
@@ -757,8 +780,7 @@ static int __gfs2_iomap_alloc(struct inode *inode, struct iomap *iomap,
 				for(i = branch_start; i < mp->mp_fheight; i++) {
 					if (mp->mp_bh[i] == NULL)
 						break;
-					brelse(mp->mp_bh[i]);
-					mp->mp_bh[i] = NULL;
+					metapath_clear(mp, i);
 				}
 				i = branch_start;
 			}
@@ -1866,10 +1888,8 @@ static int punch_hole(struct gfs2_inode *ip, u64 offset, u64 length)
 			/* We're done with the current buffer, so release it,
 			   unless it's the dinode buffer. Then back up to the
 			   previous pointer. */
-			if (mp_h) {
-				brelse(mp.mp_bh[mp_h]);
-				mp.mp_bh[mp_h] = NULL;
-			}
+			if (mp_h)
+				metapath_clear(&mp, mp_h);
 			/* If we can't get any lower in height, we've stripped
 			   off all we can. Next step is to back up and start
 			   stripping the previous level of metadata. */
