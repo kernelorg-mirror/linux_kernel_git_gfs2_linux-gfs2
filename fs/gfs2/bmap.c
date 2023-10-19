@@ -663,6 +663,43 @@ out:
 	return ret;
 }
 
+/**
+ * max_indirect_blocks - compute number of indirect blocks
+ * @inode: The inode
+ * @height: The new height of the inode
+ * @start: First block of the write
+ * @blocks: Length of the write in blocks
+ *
+ * Compute the maximum number of indirect blocks that a write of @blocks blocks
+ * at block offset @start will need to allocate.
+ */
+static unsigned int
+max_indirect_blocks(struct inode *inode, unsigned int height,
+		    u64 start, u64 blocks)
+{
+	struct gfs2_sbd *sdp = GFS2_SB(inode);
+	unsigned int max_indirect_blocks = 0;
+	unsigned int hgt;
+
+	/*
+	 * In the loop below, @blocks will reach 1 when @hgt reaches 0 or
+	 * before.
+	 */
+
+	if (blocks == 0 || height < 2)
+		return 0;
+	for (hgt = height - 2;; hgt--) {
+		blocks += do_div(start, sdp->sd_inptrs);
+		blocks += sdp->sd_inptrs - 1;
+		do_div(blocks, sdp->sd_inptrs);
+		max_indirect_blocks += blocks;
+		if (blocks == 1)
+			break;
+	}
+	max_indirect_blocks += hgt;
+	return max_indirect_blocks;
+}
+
 static inline void gfs2_indirect_init(struct metapath *mp,
 				      struct gfs2_glock *gl, unsigned int i,
 				      unsigned offset, u64 bn)
