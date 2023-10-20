@@ -297,9 +297,12 @@ struct gfs2_blkreserv {
 	u32 rs_reserved;              /* number of reserved blocks */
 };
 
+#define GFS2_AF_ORLOV 1
+
 /*
  * Allocation parameters
  * @target: The number of blocks we'd ideally like to allocate
+ * @min_target: The minimum number of blocks needed
  * @aflags: The flags (e.g. Orlov flag)
  *
  * The intent is to gradually expand this structure over time in
@@ -309,7 +312,7 @@ struct gfs2_blkreserv {
 struct gfs2_alloc_parms {
 	u64 target;
 	u32 min_target;
-	u32 aflags;
+	u32 aflags;	/* GFS2_AF_... */
 	u64 allowed;
 };
 

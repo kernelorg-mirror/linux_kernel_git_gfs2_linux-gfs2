@@ -36,7 +36,6 @@ void gfs2_rgrp_brelse(struct gfs2_rgrpd *rgd);
 
 struct gfs2_alloc *gfs2_alloc_get(struct gfs2_inode *ip);
 
-#define GFS2_AF_ORLOV 1
 int gfs2_inplace_reserve(struct gfs2_inode *ip,
 			 struct gfs2_alloc_parms *ap);
 void gfs2_inplace_release(struct gfs2_inode *ip);
