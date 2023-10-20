@@ -40,8 +40,9 @@ int gfs2_inplace_reserve(struct gfs2_inode *ip,
 			 struct gfs2_alloc_parms *ap);
 void gfs2_inplace_release(struct gfs2_inode *ip);
 
-int gfs2_old_alloc_blocks(struct gfs2_inode *ip, u64 *bn, unsigned int *n,
-		      bool dinode);
+int gfs2_alloc_blocks(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap);
+int gfs2_old_alloc_blocks(struct gfs2_inode *ip, u64 *bn, unsigned int *nblocks,
+			  bool dinode);
 
 void gfs2_rs_deltree(struct gfs2_blkreserv *rs);
 void gfs2_rs_delete(struct gfs2_inode *ip);

@@ -2406,18 +2406,21 @@ static void gfs2_set_alloc_start(struct gfs2_rbm *rbm,
 }
 
 /**
- * gfs2_old_alloc_blocks - Allocate one or more blocks of data and/or a dinode
+ * gfs2_alloc_blocks - Allocate one or more blocks of data and/or a dinode
  * @ip: the inode to allocate the block for
- * @bn: Used to return the starting block number
- * @nblocks: requested number of blocks/extent length (value/result)
- * @dinode: 1 if we're allocating a dinode block, else 0
+ * @ap: The allocation context
+ *
+ * Upon success, ap->start is set to the start of the allocation, ap->count is
+ * set to the number of blocks allocated, and ap->target is updated to indicate
+ * the number of blocks that remain to be allocated.
  *
  * Returns: 0 or error
  */
 
-int gfs2_old_alloc_blocks(struct gfs2_inode *ip, u64 *bn, unsigned int *nblocks,
-		      bool dinode)
+int gfs2_alloc_blocks(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap)
 {
+	bool dinode = ap->aflags & GFS2_AF_INODE;
+	unsigned int *nblocks;
 	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
 	struct buffer_head *dibh;
 	struct gfs2_rbm rbm = { .rgd = ip->i_res.rs_rgd, };
@@ -2425,7 +2428,11 @@ int gfs2_old_alloc_blocks(struct gfs2_inode *ip, u64 *bn, unsigned int *nblocks,
 	u32 minext = 1;
 	int error = -ENOSPC;
 
+	ap->count = ap->target;
+	nblocks = &ap->count;
+
 	BUG_ON(ip->i_res.rs_reserved < *nblocks);
+	BUG_ON(!ap->target);
 
 	rgrp_lock_local(rbm.rgd);
 	if (gfs2_rs_active(&ip->i_res)) {
@@ -2497,13 +2504,32 @@ int gfs2_old_alloc_blocks(struct gfs2_inode *ip, u64 *bn, unsigned int *nblocks,
 
 	trace_gfs2_block_alloc(ip, rbm.rgd, block, *nblocks,
 			       dinode ? GFS2_BLKST_DINODE : GFS2_BLKST_USED);
-	*bn = block;
+	ap->start = block;
+	ap->target -= *nblocks;
+	ap->aflags &= ~(GFS2_AF_ORLOV | GFS2_AF_INODE);
 	return 0;
 
 rgrp_error:
 	rgrp_unlock_local(rbm.rgd);
 	gfs2_rgrp_error(rbm.rgd);
 	return -EIO;
+}
+
+int gfs2_old_alloc_blocks(struct gfs2_inode *ip, u64 *bn, unsigned int *nblocks,
+			  bool dinode)
+{
+	struct gfs2_alloc_parms ap = {
+		.target = *nblocks,
+		.aflags = dinode ? GFS2_AF_INODE : 0,
+	};
+	int ret;
+
+	ret = gfs2_alloc_blocks(ip, &ap);
+	if (!ret) {
+		*bn = ap.start;
+		*nblocks = ap.count;
+	}
+	return ret;
 }
 
 /**

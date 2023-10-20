@@ -298,6 +298,7 @@ struct gfs2_blkreserv {
 };
 
 #define GFS2_AF_ORLOV 1
+#define GFS2_AF_INODE 2
 
 /*
  * Allocation parameters
@@ -313,7 +314,16 @@ struct gfs2_alloc_parms {
 	u64 target;
 	u32 min_target;
 	u32 aflags;	/* GFS2_AF_... */
+	u64 start;
+	unsigned int count;
 };
+
+static inline void
+gfs2_alloc_consume_blocks(struct gfs2_alloc_parms *ap, unsigned int blocks)
+{
+	ap->start += blocks;
+	ap->count -= blocks;
+}
 
 enum {
 	GLF_LOCK			= 1,
