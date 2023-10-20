@@ -72,7 +72,7 @@ static int gfs2_unstuffer_folio(struct gfs2_inode *ip, struct buffer_head *dibh,
 
 		if (!bh)
 			bh = folio_create_empty_buffers(folio,
-				BIT(inode->i_blkbits), BIT(BH_Uptodate));
+				i_blocksize(inode), BIT(BH_Uptodate));
 
 		if (!buffer_mapped(bh))
 			map_bh(bh, inode->i_sb, block);
@@ -1308,8 +1308,8 @@ static int gfs2_block_zero_range(struct inode *inode, loff_t from,
 
 static int gfs2_journaled_truncate(struct inode *inode, u64 oldsize, u64 newsize)
 {
+	u64 max_chunk = GFS2_JTRUNC_REVOKES << inode->i_blkbits;
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
-	u64 max_chunk = GFS2_JTRUNC_REVOKES * sdp->sd_vfs->s_blocksize;
 	u64 chunk;
 	int error;
 
@@ -2358,8 +2358,8 @@ static int stuffed_zero_range(struct inode *inode, loff_t offset, loff_t length)
 static int gfs2_journaled_truncate_range(struct inode *inode, loff_t offset,
 					 loff_t length)
 {
+	u64 max_chunk = GFS2_JTRUNC_REVOKES << inode->i_blkbits;
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
-	loff_t max_chunk = GFS2_JTRUNC_REVOKES * sdp->sd_vfs->s_blocksize;
 	int error;
 
 	while (length) {

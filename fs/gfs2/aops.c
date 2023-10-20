@@ -131,7 +131,7 @@ static int __gfs2_jdata_write_folio(struct folio *folio,
 		folio_clear_checked(folio);
 		if (!folio_buffers(folio)) {
 			folio_create_empty_buffers(folio,
-					inode->i_sb->s_blocksize,
+					i_blocksize(inode),
 					BIT(BH_Dirty)|BIT(BH_Uptodate));
 		}
 		gfs2_trans_add_databufs(ip, folio, 0, folio_size(folio));
