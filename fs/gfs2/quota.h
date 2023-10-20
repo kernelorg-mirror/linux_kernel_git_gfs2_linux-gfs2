@@ -43,7 +43,6 @@ static inline int gfs2_quota_lock_check(struct gfs2_inode *ip,
 	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
 	int ret;
 
-	ap->allowed = UINT_MAX; /* Assume we are permitted a whole lot */
 	if (capable(CAP_SYS_RESOURCE) ||
 	    sdp->sd_args.ar_quota == GFS2_QUOTA_OFF)
 		return 0;

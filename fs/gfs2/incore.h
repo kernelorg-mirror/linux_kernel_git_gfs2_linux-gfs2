@@ -313,7 +313,6 @@ struct gfs2_alloc_parms {
 	u64 target;
 	u32 min_target;
 	u32 aflags;	/* GFS2_AF_... */
-	u64 allowed;
 };
 
 enum {

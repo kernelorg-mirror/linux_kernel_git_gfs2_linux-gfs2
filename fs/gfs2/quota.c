@@ -1238,10 +1238,10 @@ int gfs2_quota_check(struct gfs2_inode *ip, kuid_t uid, kgid_t gid,
 	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
 	struct gfs2_quota_data *qd;
 	s64 value, warn, limit;
+	u64 allowed = -1;
 	u32 x;
 	int error = 0;
 
-	ap->allowed = UINT_MAX; /* Assume we are permitted a whole lot */
 	if (!test_bit(GIF_QD_LOCKED, &ip->i_flags))
 		return 0;
 
@@ -1259,13 +1259,13 @@ int gfs2_quota_check(struct gfs2_inode *ip, kuid_t uid, kgid_t gid,
 		value += qd->qd_change;
 		spin_unlock(&qd_lock);
 
-		if (limit > 0 && (limit - value) < ap->allowed)
-			ap->allowed = limit - value;
+		if (limit > 0 && (limit - value) < allowed)
+			allowed = limit - value;
 		/* If we can't meet the target */
 		if (limit && limit < (value + (s64)ap->target)) {
 			/* If no min_target specified or we don't meet
 			 * min_target, return -EDQUOT */
-			if (!ap->min_target || ap->min_target > ap->allowed) {
+			if (!ap->min_target || ap->min_target > allowed) {
 				if (!test_and_set_bit(QDF_QMSG_QUIET,
 						      &qd->qd_flags)) {
 					print_message(qd, "exceeded");
@@ -1287,6 +1287,8 @@ int gfs2_quota_check(struct gfs2_inode *ip, kuid_t uid, kgid_t gid,
 			qd->qd_last_warn = jiffies;
 		}
 	}
+	if (error == 0 && ap->target > allowed)
+		ap->target = allowed;
 	return error;
 }
 
