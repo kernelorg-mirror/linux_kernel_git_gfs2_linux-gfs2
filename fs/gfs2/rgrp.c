@@ -2406,7 +2406,7 @@ static void gfs2_set_alloc_start(struct gfs2_rbm *rbm,
 }
 
 /**
- * gfs2_alloc_blocks - Allocate one or more blocks of data and/or a dinode
+ * gfs2_old_alloc_blocks - Allocate one or more blocks of data and/or a dinode
  * @ip: the inode to allocate the block for
  * @bn: Used to return the starting block number
  * @nblocks: requested number of blocks/extent length (value/result)
@@ -2415,7 +2415,7 @@ static void gfs2_set_alloc_start(struct gfs2_rbm *rbm,
  * Returns: 0 or error
  */
 
-int gfs2_alloc_blocks(struct gfs2_inode *ip, u64 *bn, unsigned int *nblocks,
+int gfs2_old_alloc_blocks(struct gfs2_inode *ip, u64 *bn, unsigned int *nblocks,
 		      bool dinode)
 {
 	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
