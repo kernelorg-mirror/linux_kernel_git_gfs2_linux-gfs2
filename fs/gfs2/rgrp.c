@@ -2420,17 +2420,13 @@ static void gfs2_set_alloc_start(struct gfs2_rbm *rbm,
 int gfs2_alloc_blocks(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap)
 {
 	bool dinode = ap->aflags & GFS2_AF_INODE;
-	unsigned int *nblocks;
 	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
 	struct buffer_head *dibh;
 	struct gfs2_rbm rbm = { .rgd = ip->i_res.rs_rgd, };
 	u32 minext = 1;
 	int error = -ENOSPC;
 
-	ap->count = ap->target;
-	nblocks = &ap->count;
-
-	BUG_ON(ip->i_res.rs_reserved < *nblocks);
+	BUG_ON(ip->i_res.rs_reserved < ap->target);
 	BUG_ON(!ap->target);
 
 	rgrp_lock_local(rbm.rgd);
@@ -2445,20 +2441,22 @@ int gfs2_alloc_blocks(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap)
 
 	/* Since all blocks are reserved in advance, this shouldn't happen */
 	if (error) {
-		fs_warn(sdp, "inum=%llu error=%d, nblocks=%u, full=%d fail_pt=%d\n",
-			(unsigned long long)ip->i_no_addr, error, *nblocks,
+		fs_warn(sdp, "inum=%llu error=%d, nblocks=%llu, full=%d fail_pt=%d\n",
+			(unsigned long long)ip->i_no_addr, error,
+			(unsigned long long)ap->target,
 			test_bit(GBF_FULL, &rbm.rgd->rd_bits->bi_flags),
 			rbm.rgd->rd_extfail_pt);
 		goto rgrp_error;
 	}
 
-	gfs2_alloc_extent(&rbm, dinode, nblocks);
+	ap->count = ap->target;
+	gfs2_alloc_extent(&rbm, dinode, &ap->count);
 	ap->start = gfs2_rbm_to_block(&rbm);
-	ap->target -= *nblocks;
+	ap->target -= ap->count;
 	ap->aflags &= ~(GFS2_AF_ORLOV | GFS2_AF_INODE);
 	rbm.rgd->rd_last_alloc = ap->start - rbm.rgd->rd_data0;
 	if (!dinode) {
-		ip->i_goal = ap->start + *nblocks - 1;
+		ip->i_goal = ap->start + ap->count - 1;
 		error = gfs2_meta_inode_buffer(ip, &dibh);
 		if (error == 0) {
 			struct gfs2_dinode *di =
@@ -2470,18 +2468,18 @@ int gfs2_alloc_blocks(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap)
 		}
 	}
 	spin_lock(&rbm.rgd->rd_rsspin);
-	gfs2_adjust_reservation(ip, &rbm, *nblocks);
-	if (rbm.rgd->rd_free < *nblocks || rbm.rgd->rd_reserved < *nblocks) {
-		fs_warn(sdp, "nblocks=%u\n", *nblocks);
+	gfs2_adjust_reservation(ip, &rbm, ap->count);
+	if (rbm.rgd->rd_free < ap->count || rbm.rgd->rd_reserved < ap->count) {
+		fs_warn(sdp, "nblocks=%u\n", ap->count);
 		spin_unlock(&rbm.rgd->rd_rsspin);
 		goto rgrp_error;
 	}
-	GLOCK_BUG_ON(rbm.rgd->rd_gl, rbm.rgd->rd_reserved < *nblocks);
-	GLOCK_BUG_ON(rbm.rgd->rd_gl, rbm.rgd->rd_free_clone < *nblocks);
-	GLOCK_BUG_ON(rbm.rgd->rd_gl, rbm.rgd->rd_free < *nblocks);
-	rbm.rgd->rd_reserved -= *nblocks;
-	rbm.rgd->rd_free_clone -= *nblocks;
-	rbm.rgd->rd_free -= *nblocks;
+	GLOCK_BUG_ON(rbm.rgd->rd_gl, rbm.rgd->rd_reserved < ap->count);
+	GLOCK_BUG_ON(rbm.rgd->rd_gl, rbm.rgd->rd_free_clone < ap->count);
+	GLOCK_BUG_ON(rbm.rgd->rd_gl, rbm.rgd->rd_free < ap->count);
+	rbm.rgd->rd_reserved -= ap->count;
+	rbm.rgd->rd_free_clone -= ap->count;
+	rbm.rgd->rd_free -= ap->count;
 	spin_unlock(&rbm.rgd->rd_rsspin);
 	if (dinode) {
 		u64 generation;
@@ -2497,13 +2495,13 @@ int gfs2_alloc_blocks(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap)
 	gfs2_rgrp_out(rbm.rgd, rbm.rgd->rd_bits[0].bi_bh->b_data);
 	rgrp_unlock_local(rbm.rgd);
 
-	gfs2_statfs_change(sdp, 0, -(s64)*nblocks, dinode ? 1 : 0);
+	gfs2_statfs_change(sdp, 0, -(s64)ap->count, dinode ? 1 : 0);
 	if (dinode)
-		gfs2_trans_remove_revoke(sdp, ap->start, *nblocks);
+		gfs2_trans_remove_revoke(sdp, ap->start, ap->count);
 
-	gfs2_quota_change(ip, *nblocks, ip->i_inode.i_uid, ip->i_inode.i_gid);
+	gfs2_quota_change(ip, ap->count, ip->i_inode.i_uid, ip->i_inode.i_gid);
 
-	trace_gfs2_block_alloc(ip, rbm.rgd, ap->start, *nblocks,
+	trace_gfs2_block_alloc(ip, rbm.rgd, ap->start, ap->count,
 			       dinode ? GFS2_BLKST_DINODE : GFS2_BLKST_USED);
 	return 0;
 
