@@ -400,33 +400,31 @@ static void munge_mode_uid_gid(const struct gfs2_inode *dip,
 		inode->i_gid = current_fsgid();
 }
 
-static int alloc_dinode(struct gfs2_inode *ip, u32 flags, unsigned *dblocks)
+static int alloc_dinode(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap)
 {
 	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
-	struct gfs2_alloc_parms ap = { .target = *dblocks, .aflags = flags, };
 	int error;
 
-	error = gfs2_quota_lock_check(ip, &ap);
+	error = gfs2_quota_lock_check(ip, ap);
 	if (error)
 		goto out;
 
-	error = gfs2_inplace_reserve(ip, &ap);
+	error = gfs2_inplace_reserve(ip, ap);
 	if (error)
 		goto out_quota;
 
-	error = gfs2_trans_begin(sdp, (*dblocks * RES_RG_BIT) + RES_STATFS + RES_QUOTA, 0);
+	error = gfs2_trans_begin(sdp, (ap->target * RES_RG_BIT) + RES_STATFS + RES_QUOTA, 0);
 	if (error)
 		goto out_ipreserv;
 
-	error = gfs2_old_alloc_blocks(ip, &ip->i_no_addr, dblocks, 1);
+	error = gfs2_alloc_blocks(ip, ap);
 	if (error)
 		goto out_trans_end;
 
+	ip->i_no_addr = ap->start;
 	ip->i_no_formal_ino = ip->i_generation;
 	ip->i_inode.i_ino = ip->i_no_addr;
 	ip->i_goal = ip->i_no_addr;
-	if (*dblocks > 1)
-		ip->i_eattr = ip->i_no_addr + 1;
 
 out_trans_end:
 	gfs2_trans_end(sdp);
@@ -629,8 +627,7 @@ static int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 	struct gfs2_sbd *sdp = GFS2_SB(&dip->i_inode);
 	struct gfs2_glock *io_gl;
 	int error;
-	u32 aflags = 0;
-	unsigned blocks = 1;
+	struct gfs2_alloc_parms ap = { .target = 1, .aflags = GFS2_AF_INODE, };
 	struct gfs2_diradd da = { .bh = NULL, .save_loc = 1, };
 
 	if (!name->len || name->len > GFS2_FNAMESIZE)
@@ -730,16 +727,16 @@ static int gfs2_create_inode(struct inode *dir, struct dentry *dentry,
 
 	if ((GFS2_I(d_inode(sdp->sd_root_dir)) == dip) ||
 	    (dip->i_diskflags & GFS2_DIF_TOPDIR))
-		aflags |= GFS2_AF_ORLOV;
+		ap.aflags |= GFS2_AF_ORLOV;
 
 	if (default_acl || acl)
-		blocks++;
+		ap.target++;
 
-	error = alloc_dinode(ip, aflags, &blocks);
+	error = alloc_dinode(ip, &ap);
 	if (error)
 		goto fail_free_inode;
 
-	gfs2_set_inode_blocks(inode, blocks);
+	gfs2_set_inode_blocks(inode, ap.target + ap.count);
 
 	error = gfs2_glock_get(sdp, ip->i_no_addr, &gfs2_inode_glops, CREATE, &ip->i_gl);
 	if (error)
@@ -766,12 +763,14 @@ retry:
 	if (error)
 		goto fail_gunlock3;
 
-	error = gfs2_trans_begin(sdp, blocks, 0);
+	error = gfs2_trans_begin(sdp, ap.target + ap.count, 0);
 	if (error)
 		goto fail_gunlock3;
 
-	if (blocks > 1)
+	if (ap.count > 1) {
+		ip->i_eattr = ap.start + 1;
 		gfs2_init_xattr(ip);
+	}
 	init_dinode(dip, ip, symname);
 	gfs2_trans_end(sdp);
 
