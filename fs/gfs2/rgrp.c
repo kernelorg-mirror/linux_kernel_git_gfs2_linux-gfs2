@@ -2507,13 +2507,9 @@ rgrp_error:
 	return -EIO;
 }
 
-int gfs2_old_alloc_blocks(struct gfs2_inode *ip, u64 *bn, unsigned int *nblocks,
-			  bool dinode)
+int gfs2_old_alloc_blocks(struct gfs2_inode *ip, u64 *bn, unsigned int *nblocks)
 {
-	struct gfs2_alloc_parms ap = {
-		.target = *nblocks,
-		.aflags = dinode ? GFS2_AF_INODE : 0,
-	};
+	struct gfs2_alloc_parms ap = { .target = *nblocks, };
 	int ret;
 
 	ret = gfs2_alloc_blocks(ip, &ap);
