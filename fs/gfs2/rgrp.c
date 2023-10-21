@@ -2424,7 +2424,6 @@ int gfs2_alloc_blocks(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap)
 	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
 	struct buffer_head *dibh;
 	struct gfs2_rbm rbm = { .rgd = ip->i_res.rs_rgd, };
-	u64 block; /* block, within the file system scope */
 	u32 minext = 1;
 	int error = -ENOSPC;
 
@@ -2454,10 +2453,12 @@ int gfs2_alloc_blocks(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap)
 	}
 
 	gfs2_alloc_extent(&rbm, dinode, nblocks);
-	block = gfs2_rbm_to_block(&rbm);
-	rbm.rgd->rd_last_alloc = block - rbm.rgd->rd_data0;
+	ap->start = gfs2_rbm_to_block(&rbm);
+	ap->target -= *nblocks;
+	ap->aflags &= ~(GFS2_AF_ORLOV | GFS2_AF_INODE);
+	rbm.rgd->rd_last_alloc = ap->start - rbm.rgd->rd_data0;
 	if (!dinode) {
-		ip->i_goal = block + *nblocks - 1;
+		ip->i_goal = ap->start + *nblocks - 1;
 		error = gfs2_meta_inode_buffer(ip, &dibh);
 		if (error == 0) {
 			struct gfs2_dinode *di =
@@ -2498,15 +2499,12 @@ int gfs2_alloc_blocks(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap)
 
 	gfs2_statfs_change(sdp, 0, -(s64)*nblocks, dinode ? 1 : 0);
 	if (dinode)
-		gfs2_trans_remove_revoke(sdp, block, *nblocks);
+		gfs2_trans_remove_revoke(sdp, ap->start, *nblocks);
 
 	gfs2_quota_change(ip, *nblocks, ip->i_inode.i_uid, ip->i_inode.i_gid);
 
-	trace_gfs2_block_alloc(ip, rbm.rgd, block, *nblocks,
+	trace_gfs2_block_alloc(ip, rbm.rgd, ap->start, *nblocks,
 			       dinode ? GFS2_BLKST_DINODE : GFS2_BLKST_USED);
-	ap->start = block;
-	ap->target -= *nblocks;
-	ap->aflags &= ~(GFS2_AF_ORLOV | GFS2_AF_INODE);
 	return 0;
 
 rgrp_error:
