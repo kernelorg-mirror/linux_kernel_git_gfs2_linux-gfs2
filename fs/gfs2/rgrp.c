@@ -2220,34 +2220,31 @@ void gfs2_inplace_release(struct gfs2_inode *ip)
 /**
  * gfs2_alloc_extent - allocate an extent from a given bitmap
  * @rbm: the resource group information
- * @dinode: TRUE if the first block we allocate is for a dinode
- * @n: The extent length (value/result)
+ * @ap: The allocation context
  *
  * Add the bitmap buffer to the transaction.
  * Set the found bits to @new_state to change block's allocation state.
  */
-static void gfs2_alloc_extent(const struct gfs2_rbm *rbm, bool dinode,
-			     unsigned int *n)
+static void
+gfs2_alloc_extent(const struct gfs2_rbm *rbm, struct gfs2_alloc_parms *ap)
 {
 	struct gfs2_rbm pos = { .rgd = rbm->rgd, };
-	const unsigned int elen = *n;
-	u64 block;
+	unsigned int n = 1;
 	int ret;
 
-	*n = 1;
-	block = gfs2_rbm_to_block(rbm);
+	ap->start = gfs2_rbm_to_block(rbm);
 	gfs2_trans_add_meta(rbm->rgd->rd_gl, rbm_bi(rbm)->bi_bh);
-	gfs2_setbit(rbm, true, dinode ? GFS2_BLKST_DINODE : GFS2_BLKST_USED);
-	block++;
-	while (*n < elen) {
-		ret = gfs2_rbm_from_block(&pos, block);
+	gfs2_setbit(rbm, true, (ap->aflags & GFS2_AF_INODE) ?
+			       GFS2_BLKST_DINODE : GFS2_BLKST_USED);
+	while (n < ap->target) {
+		ret = gfs2_rbm_from_block(&pos, ap->start + n);
 		if (ret || gfs2_testbit(&pos, true) != GFS2_BLKST_FREE)
 			break;
 		gfs2_trans_add_meta(pos.rgd->rd_gl, rbm_bi(&pos)->bi_bh);
 		gfs2_setbit(&pos, true, GFS2_BLKST_USED);
-		(*n)++;
-		block++;
+		n++;
 	}
+	ap->count = n;
 }
 
 /**
@@ -2449,11 +2446,10 @@ int gfs2_alloc_blocks(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap)
 		goto rgrp_error;
 	}
 
-	ap->count = ap->target;
-	gfs2_alloc_extent(&rbm, dinode, &ap->count);
-	ap->start = gfs2_rbm_to_block(&rbm);
+	gfs2_alloc_extent(&rbm, ap);
 	ap->target -= ap->count;
 	ap->aflags &= ~(GFS2_AF_ORLOV | GFS2_AF_INODE);
+
 	rbm.rgd->rd_last_alloc = ap->start - rbm.rgd->rd_data0;
 	if (!dinode) {
 		ip->i_goal = ap->start + ap->count - 1;
