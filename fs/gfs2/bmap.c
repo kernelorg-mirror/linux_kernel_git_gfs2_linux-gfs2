@@ -1319,15 +1319,19 @@ gfs2_iomap_write_alloc(struct inode *inode,
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
-	unsigned int data_blocks, ind_blocks;
+	unsigned int blockmask = i_blocksize(inode) - 1;
+	unsigned int unstuff_block, data_blocks, ind_blocks;
 	struct gfs2_alloc_parms ap = {};
-	unsigned int blocks;
+	unsigned int blocks, revokes;
 	struct gfs2_trans *tr;
+	u64 start;
 	int ret;
 
-	gfs2_write_calc_reserv(ip, iomap->length, &data_blocks,
-			       &ind_blocks);
-	ap.target = data_blocks + ind_blocks;
+	start = pos >> inode->i_blkbits;
+	data_blocks = ((pos & blockmask) + length + blockmask) >> inode->i_blkbits;
+	ind_blocks = max_indirect_blocks(inode, mp->mp_fheight, start, data_blocks);
+	unstuff_block = gfs2_is_stuffed(ip) && i_size_read(inode) && start > 0;
+	ap.target = unstuff_block + data_blocks + ind_blocks;
 	ret = gfs2_quota_lock_check(ip, &ap);
 	if (ret)
 		return ret;
@@ -1336,17 +1340,18 @@ gfs2_iomap_write_alloc(struct inode *inode,
 	if (ret)
 		goto out_qunlock;
 
-	blocks = RES_DINODE + ind_blocks;
+	blocks = RES_DINODE + ind_blocks + RES_STATFS;
+	if (sdp->sd_args.ar_quota != GFS2_QUOTA_OFF)
+		blocks += RES_QUOTA;
 	if (gfs2_is_jdata(ip))
-		blocks += data_blocks;
-	if (ind_blocks || data_blocks)
-		blocks += RES_STATFS + RES_QUOTA;
+		blocks += unstuff_block + data_blocks;
 	if (inode == sdp->sd_rindex)
 		blocks += 2 * RES_STATFS;
-	blocks += gfs2_rg_blocks(ip, data_blocks + ind_blocks);
+	blocks += gfs2_rg_blocks(ip, unstuff_block + data_blocks + ind_blocks);
 
-	ret = gfs2_trans_begin(sdp, blocks,
-			       iomap->length >> inode->i_blkbits);
+	revokes = unstuff_block + data_blocks;
+
+	ret = gfs2_trans_begin(sdp, blocks, revokes);
 	if (ret)
 		goto out_trans_fail;
 
