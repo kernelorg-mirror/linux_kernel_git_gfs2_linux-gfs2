@@ -1321,7 +1321,7 @@ gfs2_iomap_write_alloc(struct inode *inode,
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
 	unsigned int data_blocks, ind_blocks;
 	struct gfs2_alloc_parms ap = {};
-	unsigned int rblocks;
+	unsigned int blocks;
 	struct gfs2_trans *tr;
 	int ret;
 
@@ -1336,16 +1336,16 @@ gfs2_iomap_write_alloc(struct inode *inode,
 	if (ret)
 		goto out_qunlock;
 
-	rblocks = RES_DINODE + ind_blocks;
+	blocks = RES_DINODE + ind_blocks;
 	if (gfs2_is_jdata(ip))
-		rblocks += data_blocks;
+		blocks += data_blocks;
 	if (ind_blocks || data_blocks)
-		rblocks += RES_STATFS + RES_QUOTA;
+		blocks += RES_STATFS + RES_QUOTA;
 	if (inode == sdp->sd_rindex)
-		rblocks += 2 * RES_STATFS;
-	rblocks += gfs2_rg_blocks(ip, data_blocks + ind_blocks);
+		blocks += 2 * RES_STATFS;
+	blocks += gfs2_rg_blocks(ip, data_blocks + ind_blocks);
 
-	ret = gfs2_trans_begin(sdp, rblocks,
+	ret = gfs2_trans_begin(sdp, blocks,
 			       iomap->length >> inode->i_blkbits);
 	if (ret)
 		goto out_trans_fail;
