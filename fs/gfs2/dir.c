@@ -867,7 +867,6 @@ got_dent:
 static struct gfs2_leaf *new_leaf(struct inode *inode, struct buffer_head **pbh, u16 depth)
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
-	unsigned int n = 1;
 	u64 bn;
 	int error;
 	struct buffer_head *bh;
@@ -875,7 +874,7 @@ static struct gfs2_leaf *new_leaf(struct inode *inode, struct buffer_head **pbh,
 	struct gfs2_dirent *dent;
 	struct timespec64 tv = current_time(inode);
 
-	error = gfs2_old_alloc_blocks(ip, &bn, &n);
+	error = gfs2_alloc_block(ip, &bn);
 	if (error)
 		return NULL;
 	bh = gfs2_meta_new(ip->i_gl, bn);

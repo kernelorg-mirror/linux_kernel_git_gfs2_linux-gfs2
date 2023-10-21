@@ -41,6 +41,7 @@ int gfs2_inplace_reserve(struct gfs2_inode *ip,
 void gfs2_inplace_release(struct gfs2_inode *ip);
 
 int gfs2_alloc_blocks(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap);
+int gfs2_alloc_block(struct gfs2_inode *ip, u64 *bn);
 int gfs2_old_alloc_blocks(struct gfs2_inode *ip, u64 *bn, unsigned int *nblocks);
 
 void gfs2_rs_deltree(struct gfs2_blkreserv *rs);

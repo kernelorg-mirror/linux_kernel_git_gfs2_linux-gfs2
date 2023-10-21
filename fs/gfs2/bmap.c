@@ -104,8 +104,7 @@ static int __gfs2_unstuff_inode(struct gfs2_inode *ip, struct folio *folio)
 		/* Get a free block, fill it with the stuffed data,
 		   and write it out to disk */
 
-		unsigned int n = 1;
-		error = gfs2_old_alloc_blocks(ip, &block, &n);
+		error = gfs2_alloc_block(ip, &block);
 		if (error)
 			goto out_brelse;
 		if (isdir) {

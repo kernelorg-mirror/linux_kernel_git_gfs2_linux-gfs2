@@ -635,11 +635,10 @@ static int ea_alloc_blk(struct gfs2_inode *ip, struct buffer_head **bhp)
 {
 	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
 	struct gfs2_ea_header *ea;
-	unsigned int n = 1;
 	u64 block;
 	int error;
 
-	error = gfs2_old_alloc_blocks(ip, &block, &n);
+	error = gfs2_alloc_block(ip, &block);
 	if (error)
 		return error;
 	gfs2_trans_remove_revoke(sdp, block, 1);
@@ -699,9 +698,8 @@ static int ea_write(struct gfs2_inode *ip, struct gfs2_ea_header *ea,
 			struct buffer_head *bh;
 			u64 block;
 			int mh_size = sizeof(struct gfs2_meta_header);
-			unsigned int n = 1;
 
-			error = gfs2_old_alloc_blocks(ip, &block, &n);
+			error = gfs2_alloc_block(ip, &block);
 			if (error)
 				return error;
 			gfs2_trans_remove_revoke(sdp, block, 1);
@@ -1001,8 +999,8 @@ static int ea_set_block(struct gfs2_inode *ip, struct gfs2_ea_request *er,
 		gfs2_trans_add_meta(ip->i_gl, indbh);
 	} else {
 		u64 blk;
-		unsigned int n = 1;
-		error = gfs2_old_alloc_blocks(ip, &blk, &n);
+
+		error = gfs2_alloc_block(ip, &blk);
 		if (error)
 			return error;
 		gfs2_trans_remove_revoke(sdp, blk, 1);

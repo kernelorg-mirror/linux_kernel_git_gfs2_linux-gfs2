@@ -2507,6 +2507,17 @@ rgrp_error:
 	return -EIO;
 }
 
+int gfs2_alloc_block(struct gfs2_inode *ip, u64 *bn)
+{
+	struct gfs2_alloc_parms ap = { .target = 1, };
+	int ret;
+
+	ret = gfs2_alloc_blocks(ip, &ap);
+	if (!ret)
+		*bn = ap.start;
+	return ret;
+}
+
 int gfs2_old_alloc_blocks(struct gfs2_inode *ip, u64 *bn, unsigned int *nblocks)
 {
 	struct gfs2_alloc_parms ap = { .target = *nblocks, };
