@@ -700,6 +700,59 @@ max_indirect_blocks(struct inode *inode, unsigned int height,
 	return max_indirect_blocks;
 }
 
+static int
+gfs2_indirect_block_counter(struct metapath *mp, unsigned int ptrs,
+			     void *data)
+{
+	unsigned int *min_blocks = data;
+	const __be64 *start, *ptr, *end;
+	unsigned int hgt;
+
+	if (mp->mp_aheight == mp->mp_fheight)
+		return WALK_CONTINUE;
+
+	hgt = mp->mp_aheight - 1;
+	start = metapointer(hgt, mp);
+	end = start + ptrs;
+
+	for (ptr = start; ptr != end; ptr++) {
+		if (!*ptr)
+			(*min_blocks)++;
+	}
+	return WALK_CONTINUE;
+}
+
+/**
+ * min_indirect_blocks - compute minimum number of indirect blocks
+ * @inode: the inode
+ * @mp: the metapath for the first block
+ * @blocks: number of blocks to be allocated
+ *
+ * Compute the minimum number of indirect blocks needed for allocating @blocks
+ * blocks at @mp.
+ */
+static int
+min_indirect_blocks(struct inode *inode, struct metapath *mp,
+			   u64 blocks)
+{
+	struct gfs2_inode *ip = GFS2_I(inode);
+	int min_blocks = 0;
+	struct metapath clone;
+	int ret;
+
+	if (ip->i_height < 2)
+		return 0;
+
+	clone_metapath(&clone, mp);
+	ret = gfs2_walk_metadata(inode, &clone, blocks,
+				 gfs2_indirect_block_counter,
+				 &min_blocks);
+	release_metapath(&clone);
+	if (ret)
+		return ret;
+	return min_blocks;
+}
+
 static inline void gfs2_indirect_init(struct metapath *mp,
 				      struct gfs2_glock *gl, unsigned int i,
 				      unsigned offset, u64 bn)
