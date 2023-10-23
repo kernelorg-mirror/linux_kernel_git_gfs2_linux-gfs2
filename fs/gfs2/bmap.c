@@ -88,7 +88,8 @@ static int gfs2_unstuffer_folio(struct gfs2_inode *ip, struct buffer_head *dibh,
 	return 0;
 }
 
-static int __gfs2_unstuff_inode(struct gfs2_inode *ip, struct folio *folio)
+static int
+___gfs2_unstuff_inode(struct gfs2_inode *ip, struct folio *folio)
 {
 	struct buffer_head *bh, *dibh;
 	struct gfs2_dinode *di;
@@ -142,6 +143,23 @@ out_brelse:
 	return error;
 }
 
+static int
+__gfs2_unstuff_inode(struct inode *inode)
+{
+	struct folio *folio;
+	int error;
+
+	folio = filemap_grab_folio(inode->i_mapping, 0);
+	error = PTR_ERR(folio);
+	if (IS_ERR(folio))
+		goto out;
+	error = ___gfs2_unstuff_inode(GFS2_I(inode), folio);
+	folio_unlock(folio);
+	folio_put(folio);
+out:
+	return error;
+}
+
 /**
  * gfs2_unstuff_inode - Unstuff an inode when the data has grown too big
  * @ip: The GFS2 inode to unstuff
@@ -155,18 +173,10 @@ out_brelse:
 int gfs2_unstuff_inode(struct inode *inode)
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
-	struct folio *folio;
 	int error;
 
 	down_write(&ip->i_rw_mutex);
-	folio = filemap_grab_folio(inode->i_mapping, 0);
-	error = PTR_ERR(folio);
-	if (IS_ERR(folio))
-		goto out;
-	error = __gfs2_unstuff_inode(ip, folio);
-	folio_unlock(folio);
-	folio_put(folio);
-out:
+	error = __gfs2_unstuff_inode(inode);
 	up_write(&ip->i_rw_mutex);
 	return error;
 }
