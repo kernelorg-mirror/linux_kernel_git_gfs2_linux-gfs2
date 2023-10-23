@@ -89,8 +89,9 @@ static int gfs2_unstuffer_folio(struct gfs2_inode *ip, struct buffer_head *dibh,
 }
 
 static int
-___gfs2_unstuff_inode(struct gfs2_inode *ip, struct folio *folio)
+___gfs2_unstuff_inode(struct inode *inode, struct folio *folio)
 {
+	struct gfs2_inode *ip = GFS2_I(inode);
 	struct buffer_head *bh, *dibh;
 	struct gfs2_dinode *di;
 	u64 block = 0;
@@ -101,7 +102,7 @@ ___gfs2_unstuff_inode(struct gfs2_inode *ip, struct folio *folio)
 	if (error)
 		return error;
 
-	if (i_size_read(&ip->i_inode)) {
+	if (i_size_read(inode)) {
 		/* Get a free block, fill it with the stuffed data,
 		   and write it out to disk */
 
@@ -109,7 +110,7 @@ ___gfs2_unstuff_inode(struct gfs2_inode *ip, struct folio *folio)
 		if (error)
 			goto out_brelse;
 		if (isdir) {
-			gfs2_trans_remove_revoke(GFS2_SB(&ip->i_inode), block, 1);
+			gfs2_trans_remove_revoke(GFS2_SB(inode), block, 1);
 			error = gfs2_dir_get_new_buffer(ip, block, &bh);
 			if (error)
 				goto out_brelse;
@@ -129,10 +130,10 @@ ___gfs2_unstuff_inode(struct gfs2_inode *ip, struct folio *folio)
 	di = (struct gfs2_dinode *)dibh->b_data;
 	gfs2_buffer_clear_tail(dibh, sizeof(struct gfs2_dinode));
 
-	if (i_size_read(&ip->i_inode)) {
+	if (i_size_read(inode)) {
 		*(__be64 *)(di + 1) = cpu_to_be64(block);
-		gfs2_add_inode_blocks(&ip->i_inode, 1);
-		di->di_blocks = cpu_to_be64(gfs2_get_inode_blocks(&ip->i_inode));
+		gfs2_add_inode_blocks(inode, 1);
+		di->di_blocks = cpu_to_be64(gfs2_get_inode_blocks(inode));
 	}
 
 	ip->i_height = 1;
@@ -153,7 +154,7 @@ __gfs2_unstuff_inode(struct inode *inode)
 	error = PTR_ERR(folio);
 	if (IS_ERR(folio))
 		goto out;
-	error = ___gfs2_unstuff_inode(GFS2_I(inode), folio);
+	error = ___gfs2_unstuff_inode(inode, folio);
 	folio_unlock(folio);
 	folio_put(folio);
 out:
