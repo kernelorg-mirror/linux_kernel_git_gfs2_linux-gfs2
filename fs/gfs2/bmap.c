@@ -1058,7 +1058,7 @@ gfs2_iomap_write_alloc(struct inode *inode,
 		goto out_trans_fail;
 
 	if (gfs2_is_stuffed(ip)) {
-		ret = gfs2_unstuff_inode(inode);
+		ret = __gfs2_unstuff_inode(inode, &ap);
 		if (ret)
 			goto out_trans_end;
 		mp->mp_aheight = 1;
@@ -2136,7 +2136,9 @@ static int do_grow(struct inode *inode, u64 size)
 		goto do_grow_release;
 
 	if (unstuff) {
-		error = gfs2_unstuff_inode(inode);
+		down_write(&ip->i_rw_mutex);
+		error = __gfs2_unstuff_inode(inode, &ap);
+		up_write(&ip->i_rw_mutex);
 		if (error)
 			goto do_end_trans;
 	}
