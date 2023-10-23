@@ -753,6 +753,106 @@ min_indirect_blocks(struct inode *inode, struct metapath *mp,
 	return min_blocks;
 }
 
+struct gfs2_alloc_walk_context {
+	struct gfs2_alloc_parms *ap;
+	struct inode *inode;
+	bool done;
+};
+
+static int
+gfs2_indirect_block_alloc(struct metapath *mp, unsigned int ptrs,
+			  void *data)
+{
+	struct gfs2_alloc_walk_context *ctx = data;
+	struct gfs2_alloc_parms *ap = ctx->ap;
+	struct inode *inode = ctx->inode;
+	struct gfs2_inode *ip = GFS2_I(inode);
+	struct gfs2_glock *gl = ip->i_gl;
+	struct gfs2_sbd *sdp = GFS2_SB(inode);
+	__be64 *start, *ptr, *end;
+	unsigned int hgt, blocks = 0;
+	bool touched = false;
+
+	if (mp->mp_aheight == mp->mp_fheight)
+		return WALK_CONTINUE;
+
+	hgt = mp->mp_aheight - 1;
+	start = metapointer(hgt, mp);
+	end = start + ptrs;
+
+	for (ptr = start; ptr != end; ptr++) {
+		struct buffer_head *bh;
+		u64 block;
+		int ret;
+
+		if (*ptr)
+			continue;
+
+		if (ap->count == blocks) {
+			if (blocks) {
+				gfs2_trans_remove_revoke(sdp, ap->start, blocks);
+				gfs2_alloc_consume_blocks(ap, blocks);
+				gfs2_add_inode_blocks(inode, blocks);
+				blocks = 0;
+				touched = true;
+			}
+			ret = gfs2_alloc_blocks(ip, ap);
+			if (ret)
+				return ret;
+		}
+		block = ap->start + blocks;
+		blocks++;
+
+		bh = gfs2_meta_new(gl, block);
+		gfs2_trans_add_meta(gl, bh);
+		gfs2_metatype_set(bh, GFS2_METATYPE_IN, GFS2_FORMAT_IN);
+		gfs2_buffer_clear_tail(bh, sizeof(struct gfs2_meta_header));
+		*ptr = cpu_to_be64(block);
+	}
+	if (blocks) {
+		gfs2_trans_remove_revoke(sdp, ap->start, blocks);
+		gfs2_alloc_consume_blocks(ap, blocks);
+		gfs2_add_inode_blocks(inode, blocks);
+		touched = true;
+	}
+	if (touched) {
+		gfs2_trans_add_meta(gl, mp->mp_bh[hgt]);
+		if (hgt < mp->mp_fheight - 2)
+			ctx->done = false;
+	}
+	return WALK_CONTINUE;
+}
+
+static int
+gfs2_alloc_indirect_blocks(struct inode *inode, struct metapath *mp,
+			   struct gfs2_alloc_parms *ap, u64 blocks)
+{
+	struct gfs2_alloc_walk_context ctx = {
+		.ap = ap,
+		.inode = inode,
+		.done = true,
+	};
+	struct gfs2_inode *ip = GFS2_I(inode);
+	struct metapath clone;
+	int ret;
+
+	if (ip->i_height < 2)
+		return 0;
+
+	clone_metapath(&clone, mp);
+	ret = gfs2_walk_metadata(inode, &clone, blocks,
+				 gfs2_indirect_block_alloc,
+				 NULL);
+	release_metapath(&clone);
+	if (ret)
+		return ret;
+
+	ret = __fillup_metapath(GFS2_I(inode), mp, mp->mp_aheight, mp->mp_fheight);
+	if (!ret && !ctx.done)
+		ret = -EAGAIN;
+	return ret;
+}
+
 static inline void gfs2_indirect_init(struct metapath *mp,
 				      struct gfs2_glock *gl, unsigned int i,
 				      unsigned offset, u64 bn)
