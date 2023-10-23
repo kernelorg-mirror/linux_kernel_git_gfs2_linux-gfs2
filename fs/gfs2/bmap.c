@@ -2064,9 +2064,10 @@ static int do_grow(struct inode *inode, u64 size)
 	struct gfs2_alloc_parms ap = { .target = 1, };
 	struct buffer_head *dibh;
 	int error;
-	int unstuff = 0;
+	bool unstuff = false;
 
-	if (gfs2_is_stuffed(ip) && size > gfs2_max_stuffed_size(ip)) {
+	unstuff = gfs2_is_stuffed(ip) && size > gfs2_max_stuffed_size(ip);
+	if (unstuff) {
 		error = gfs2_quota_lock_check(ip, &ap);
 		if (error)
 			return error;
@@ -2074,7 +2075,6 @@ static int do_grow(struct inode *inode, u64 size)
 		error = gfs2_inplace_reserve(ip, &ap);
 		if (error)
 			goto do_grow_qunlock;
-		unstuff = 1;
 	}
 
 	error = gfs2_trans_begin(sdp, RES_DINODE + RES_STATFS + RES_RG_BIT +
