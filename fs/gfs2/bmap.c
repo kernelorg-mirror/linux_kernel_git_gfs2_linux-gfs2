@@ -89,7 +89,8 @@ static int gfs2_unstuffer_folio(struct gfs2_inode *ip, struct buffer_head *dibh,
 }
 
 static int
-___gfs2_unstuff_inode(struct inode *inode, struct folio *folio)
+___gfs2_unstuff_inode(struct inode *inode, struct folio *folio,
+		      struct gfs2_alloc_parms *ap)
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct buffer_head *bh, *dibh;
@@ -106,7 +107,7 @@ ___gfs2_unstuff_inode(struct inode *inode, struct folio *folio)
 		/* Get a free block, fill it with the stuffed data,
 		   and write it out to disk */
 
-		error = gfs2_alloc_block(ip, &block);
+		error = gfs2_alloc_blocks(ip, ap);
 		if (error)
 			goto out_brelse;
 		if (isdir) {
@@ -145,7 +146,7 @@ out_brelse:
 }
 
 static int
-__gfs2_unstuff_inode(struct inode *inode)
+__gfs2_unstuff_inode(struct inode *inode, struct gfs2_alloc_parms *ap)
 {
 	struct folio *folio;
 	int error;
@@ -154,7 +155,7 @@ __gfs2_unstuff_inode(struct inode *inode)
 	error = PTR_ERR(folio);
 	if (IS_ERR(folio))
 		goto out;
-	error = ___gfs2_unstuff_inode(inode, folio);
+	error = ___gfs2_unstuff_inode(inode, folio, ap);
 	folio_unlock(folio);
 	folio_put(folio);
 out:
@@ -173,11 +174,12 @@ out:
 
 int gfs2_unstuff_inode(struct inode *inode)
 {
+	struct gfs2_alloc_parms ap = { .target = 1, };
 	struct gfs2_inode *ip = GFS2_I(inode);
 	int error;
 
 	down_write(&ip->i_rw_mutex);
-	error = __gfs2_unstuff_inode(inode);
+	error = __gfs2_unstuff_inode(inode, &ap);
 	up_write(&ip->i_rw_mutex);
 	return error;
 }
