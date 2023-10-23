@@ -143,18 +143,18 @@ out_brelse:
 }
 
 /**
- * gfs2_unstuff_dinode - Unstuff a dinode when the data has grown too big
+ * gfs2_unstuff_inode - Unstuff an inode when the data has grown too big
  * @ip: The GFS2 inode to unstuff
  *
- * This routine unstuffs a dinode and returns it to a "normal" state such
+ * This routine unstuffs an inode and returns it to a "normal" state such
  * that the height can be grown in the traditional way.
  *
  * Returns: errno
  */
 
-int gfs2_unstuff_dinode(struct gfs2_inode *ip)
+int gfs2_unstuff_inode(struct inode *inode)
 {
-	struct inode *inode = &ip->i_inode;
+	struct gfs2_inode *ip = GFS2_I(inode);
 	struct folio *folio;
 	int error;
 
@@ -1045,7 +1045,7 @@ gfs2_iomap_write_alloc(struct inode *inode,
 		goto out_trans_fail;
 
 	if (gfs2_is_stuffed(ip)) {
-		ret = gfs2_unstuff_dinode(ip);
+		ret = gfs2_unstuff_inode(inode);
 		if (ret)
 			goto out_trans_end;
 		mp->mp_aheight = 1;
@@ -2123,7 +2123,7 @@ static int do_grow(struct inode *inode, u64 size)
 		goto do_grow_release;
 
 	if (unstuff) {
-		error = gfs2_unstuff_dinode(ip);
+		error = gfs2_unstuff_inode(inode);
 		if (error)
 			goto do_end_trans;
 	}

@@ -47,7 +47,7 @@ static inline void gfs2_write_calc_reserv(const struct gfs2_inode *ip,
 extern const struct iomap_ops gfs2_iomap_ops;
 extern const struct iomap_writeback_ops gfs2_writeback_ops;
 
-int gfs2_unstuff_dinode(struct gfs2_inode *ip);
+int gfs2_unstuff_inode(struct inode *inode);
 int gfs2_block_map(struct inode *inode, sector_t lblock,
 		   struct buffer_head *bh, int create);
 int gfs2_iomap_get(struct inode *inode, loff_t pos, loff_t length,
