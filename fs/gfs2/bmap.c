@@ -1324,8 +1324,10 @@ gfs2_iomap_write_alloc(struct inode *inode,
 	struct gfs2_alloc_parms ap = {};
 	unsigned int blocks, revokes;
 	struct gfs2_trans *tr;
-	u64 start;
+	u64 start, addr, len;
 	int ret;
+
+	down_write(&ip->i_rw_mutex);
 
 	start = pos >> inode->i_blkbits;
 	data_blocks = ((pos & blockmask) + length + blockmask) >> inode->i_blkbits;
@@ -1334,7 +1336,7 @@ gfs2_iomap_write_alloc(struct inode *inode,
 	ap.target = unstuff_block + data_blocks + ind_blocks;
 	ret = gfs2_quota_lock_check(ip, &ap);
 	if (ret)
-		return ret;
+		goto out;
 
 	ret = gfs2_inplace_reserve(ip, &ap);
 	if (ret)
@@ -1355,10 +1357,20 @@ gfs2_iomap_write_alloc(struct inode *inode,
 	if (ret)
 		goto out_trans_fail;
 
+	if (ind_blocks) {
+		/* We may have to allocate indirect blocks.  */
+		ap.target -= ind_blocks;
+		ret = min_indirect_blocks(inode, mp, data_blocks);
+		if (ret < 0)
+			goto out_trans_end;
+		ind_blocks = ret;
+		ap.target += ind_blocks;
+	}
+
 	if (gfs2_is_stuffed(ip)) {
 		ret = __gfs2_unstuff_inode(inode, &ap);
 		if (ret)
-			goto out_trans_end;
+			goto out_free;
 		mp->mp_aheight = 1;
 		if (iomap->offset == 0 && inode->i_size != 0) {
 			__be64 *ptr = metapointer(0, mp);
@@ -1370,29 +1382,66 @@ gfs2_iomap_write_alloc(struct inode *inode,
 		}
 	}
 
-	if (iomap->type == IOMAP_HOLE) {
-		ret = __gfs2_iomap_alloc(inode, iomap, mp);
-		if (ret) {
-			gfs2_trans_end(sdp);
-			gfs2_inplace_release(ip);
-			punch_hole(ip, iomap->offset, iomap->length);
-			goto out_qunlock;
-		}
+	while (ip->i_height < mp->mp_fheight) {
+		ret = gfs2_grow_height(ip, mp, &ap);
+		if (ret)
+			goto out_free;
+	}
+
+	/* The beginning of the path exists now. */
+	ret = __fillup_metapath(GFS2_I(inode), mp, mp->mp_aheight, mp->mp_fheight);
+	if (ret)
+		goto out_free;
+
+	while (ind_blocks) {
+		ret = gfs2_alloc_indirect_blocks(inode, mp, &ap, data_blocks);
+		if (ret == 0)
+			break;
+		if (ret != -EAGAIN)
+			goto out_free;
+		/*
+		 * Additional indirect blocks need to be allocated below the
+		 * ones that have just been allocated.
+		 */
+		ret = min_indirect_blocks(inode, mp, data_blocks);
+		if (ret < 0)
+			goto out_free;
+		ind_blocks = ret;
+		ap.target += ind_blocks;
+	}
+
+	ret = gfs2_alloc_data_blocks(inode, mp, &ap, data_blocks, &addr, &len);
+	if (ret) {
+		gfs2_trans_end(sdp);
+		gfs2_inplace_release(ip);
+		/* XXX deal better with unwritten blocks! */
+		punch_hole(ip, iomap->offset, iomap->length);
+		goto out_free;
 	}
 
 	tr = current->journal_info;
 	if (tr->tr_num_buf_new)
 		__mark_inode_dirty(inode, I_DIRTY_DATASYNC);
 
+	iomap->type = IOMAP_MAPPED;
+	iomap->addr = addr << inode->i_blkbits;
+	iomap->length = len << inode->i_blkbits;
+	iomap->flags |= IOMAP_F_MERGED | IOMAP_F_NEW;
+
 	gfs2_trans_end(sdp);
+	up_write(&ip->i_rw_mutex);
 	return 0;
 
+out_free:
+	/* XXX free leftover allocated blocks */
 out_trans_end:
 	gfs2_trans_end(sdp);
 out_trans_fail:
 	gfs2_inplace_release(ip);
 out_qunlock:
 	gfs2_quota_unlock(ip);
+out:
+	up_write(&ip->i_rw_mutex);
 	return ret;
 }
 
