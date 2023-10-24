@@ -1006,6 +1006,85 @@ hole_found:
 	goto out;
 }
 
+static int
+gfs2_iomap_write_alloc(struct inode *inode,
+		       unsigned flags, struct iomap *iomap,
+		       struct metapath *mp)
+{
+	struct gfs2_inode *ip = GFS2_I(inode);
+	struct gfs2_sbd *sdp = GFS2_SB(inode);
+	unsigned int data_blocks, ind_blocks;
+	struct gfs2_alloc_parms ap = {};
+	unsigned int rblocks;
+	struct gfs2_trans *tr;
+	int ret;
+
+	gfs2_write_calc_reserv(ip, iomap->length, &data_blocks,
+			       &ind_blocks);
+	ap.target = data_blocks + ind_blocks;
+	ret = gfs2_quota_lock_check(ip, &ap);
+	if (ret)
+		return ret;
+
+	ret = gfs2_inplace_reserve(ip, &ap);
+	if (ret)
+		goto out_qunlock;
+
+	rblocks = RES_DINODE + ind_blocks;
+	if (gfs2_is_jdata(ip))
+		rblocks += data_blocks;
+	if (ind_blocks || data_blocks)
+		rblocks += RES_STATFS + RES_QUOTA;
+	if (inode == sdp->sd_rindex)
+		rblocks += 2 * RES_STATFS;
+	rblocks += gfs2_rg_blocks(ip, data_blocks + ind_blocks);
+
+	ret = gfs2_trans_begin(sdp, rblocks,
+			       iomap->length >> inode->i_blkbits);
+	if (ret)
+		goto out_trans_fail;
+
+	if (gfs2_is_stuffed(ip)) {
+		ret = gfs2_unstuff_dinode(ip);
+		if (ret)
+			goto out_trans_end;
+		mp->mp_aheight = 1;
+		if (iomap->offset == 0 && inode->i_size != 0) {
+			__be64 *ptr = metapointer(0, mp);
+			u64 dblock = be64_to_cpu(*ptr);
+
+			iomap->type = IOMAP_MAPPED;
+			iomap->addr = dblock << inode->i_blkbits;
+			iomap->flags |= IOMAP_F_MERGED;
+		}
+	}
+
+	if (iomap->type == IOMAP_HOLE) {
+		ret = __gfs2_iomap_alloc(inode, iomap, mp);
+		if (ret) {
+			gfs2_trans_end(sdp);
+			gfs2_inplace_release(ip);
+			punch_hole(ip, iomap->offset, iomap->length);
+			goto out_qunlock;
+		}
+	}
+
+	tr = current->journal_info;
+	if (tr->tr_num_buf_new)
+		__mark_inode_dirty(inode, I_DIRTY_DATASYNC);
+
+	gfs2_trans_end(sdp);
+	return 0;
+
+out_trans_end:
+	gfs2_trans_end(sdp);
+out_trans_fail:
+	gfs2_inplace_release(ip);
+out_qunlock:
+	gfs2_quota_unlock(ip);
+	return ret;
+}
+
 static struct folio *
 gfs2_iomap_get_folio(struct iomap_iter *iter, loff_t pos, unsigned len)
 {
@@ -1052,89 +1131,6 @@ static const struct iomap_folio_ops gfs2_iomap_folio_ops = {
 	.put_folio = gfs2_iomap_put_folio,
 };
 
-static int gfs2_iomap_begin_write(struct inode *inode,
-				  struct iomap *iomap, struct metapath *mp)
-{
-	struct gfs2_inode *ip = GFS2_I(inode);
-	struct gfs2_sbd *sdp = GFS2_SB(inode);
-	int ret;
-
-	if (iomap->type == IOMAP_HOLE) {
-		unsigned int data_blocks, ind_blocks;
-		struct gfs2_alloc_parms ap = {};
-		unsigned int rblocks;
-		struct gfs2_trans *tr;
-
-		gfs2_write_calc_reserv(ip, iomap->length, &data_blocks,
-				       &ind_blocks);
-		ap.target = data_blocks + ind_blocks;
-		ret = gfs2_quota_lock_check(ip, &ap);
-		if (ret)
-			return ret;
-
-		ret = gfs2_inplace_reserve(ip, &ap);
-		if (ret)
-			goto out_qunlock;
-
-		rblocks = RES_DINODE + ind_blocks;
-		if (gfs2_is_jdata(ip))
-			rblocks += data_blocks;
-		if (ind_blocks || data_blocks)
-			rblocks += RES_STATFS + RES_QUOTA;
-		if (inode == sdp->sd_rindex)
-			rblocks += 2 * RES_STATFS;
-		rblocks += gfs2_rg_blocks(ip, data_blocks + ind_blocks);
-
-		ret = gfs2_trans_begin(sdp, rblocks,
-				       iomap->length >> inode->i_blkbits);
-		if (ret)
-			goto out_trans_fail;
-
-		if (gfs2_is_stuffed(ip)) {
-			ret = gfs2_unstuff_dinode(ip);
-			if (ret)
-				goto out_trans_end;
-			mp->mp_aheight = 1;
-			if (iomap->offset == 0 && inode->i_size != 0) {
-				__be64 *ptr = metapointer(0, mp);
-				u64 dblock = be64_to_cpu(*ptr);
-
-				iomap->type = IOMAP_MAPPED;
-				iomap->addr = dblock << inode->i_blkbits;
-				iomap->flags |= IOMAP_F_MERGED;
-			}
-		}
-
-		if (iomap->type == IOMAP_HOLE) {
-			ret = __gfs2_iomap_alloc(inode, iomap, mp);
-			if (ret) {
-				gfs2_trans_end(sdp);
-				gfs2_inplace_release(ip);
-				punch_hole(ip, iomap->offset, iomap->length);
-				goto out_qunlock;
-			}
-		}
-
-		tr = current->journal_info;
-		if (tr->tr_num_buf_new)
-			__mark_inode_dirty(inode, I_DIRTY_DATASYNC);
-
-		gfs2_trans_end(sdp);
-	}
-
-	if (gfs2_is_stuffed(ip) || gfs2_is_jdata(ip))
-		iomap->folio_ops = &gfs2_iomap_folio_ops;
-	return 0;
-
-out_trans_end:
-	gfs2_trans_end(sdp);
-out_trans_fail:
-	gfs2_inplace_release(ip);
-out_qunlock:
-	gfs2_quota_unlock(ip);
-	return ret;
-}
-
 static int gfs2_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 			    unsigned flags, struct iomap *iomap,
 			    struct iomap *srcmap)
@@ -1174,7 +1170,17 @@ static int gfs2_iomap_begin(struct inode *inode, loff_t pos, loff_t length,
 		goto out_unlock;
 	}
 
-	ret = gfs2_iomap_begin_write(inode, iomap, &mp);
+	if ((gfs2_is_stuffed(ip) &&
+	     pos + length > gfs2_max_stuffed_size(ip)) ||
+	    iomap->type == IOMAP_HOLE) {
+		ret = gfs2_iomap_write_alloc(inode, pos, length,
+					     flags, iomap, &mp);
+		if (ret)
+			goto out_unlock;
+	}
+
+	if (gfs2_is_stuffed(ip) || gfs2_is_jdata(ip))
+		iomap->folio_ops = &gfs2_iomap_folio_ops;
 
 out_unlock:
 	release_metapath(&mp);
