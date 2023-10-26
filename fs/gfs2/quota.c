@@ -772,9 +772,22 @@ static int gfs2_write_buf_to_page(struct gfs2_sbd *sdp, unsigned long index,
 			continue;
 		}
 		if (!buffer_mapped(bh)) {
-			gfs2_block_map(inode, blk, bh, 1);
-			if (!buffer_mapped(bh))
+			struct iomap iomap = { };
+			int ret;
+
+			ret = gfs2_iomap_alloc(inode, blk << inode->i_blkbits,
+					       bsize, &iomap);
+			if (ret)
 				goto unlock_out;
+
+			map_bh(bh, inode->i_sb, iomap.addr >> inode->i_blkbits);
+			clear_buffer_new(bh);
+			if (iomap.flags & IOMAP_F_NEW)
+				set_buffer_new(bh);
+			clear_buffer_boundary(bh);
+			if (iomap.flags & IOMAP_F_GFS2_BOUNDARY)
+				set_buffer_boundary(bh);
+
 			/* If it's a newly allocated disk block, zero it */
 			if (buffer_new(bh))
 				zero_user(page, bnum * bsize, bh->b_size);

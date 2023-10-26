@@ -802,8 +802,6 @@ out:
 	return ret;
 }
 
-#define IOMAP_F_GFS2_BOUNDARY IOMAP_F_PRIVATE
-
 /**
  * gfs2_alloc_size - Compute the maximum allocation size
  * @inode: The inode
