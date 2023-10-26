@@ -853,6 +853,71 @@ gfs2_alloc_indirect_blocks(struct inode *inode, struct metapath *mp,
 	return ret;
 }
 
+static int
+gfs2_data_block_alloc(struct metapath *mp, unsigned int ptrs,
+		      void *data)
+{
+	struct gfs2_alloc_walk_context *ctx = data;
+	struct gfs2_alloc_parms *ap = ctx->ap;
+	struct inode *inode = ctx->inode;
+	struct gfs2_inode *ip = GFS2_I(inode);
+	struct gfs2_sbd *sdp = GFS2_SB(inode);
+	__be64 *start, *ptr, *end;
+	unsigned int hgt, blocks = 0;
+
+	BUG_ON(mp->mp_aheight != mp->mp_fheight);
+
+	hgt = mp->mp_aheight - 1;
+	start = metapointer(hgt, mp);
+	end = start + ptrs;
+
+	for (ptr = start; ptr != end; ptr++) {
+		if (ap->count == blocks)
+			break;
+		BUG_ON(*ptr);
+		*ptr = ap->start + blocks;
+		blocks++;
+	}
+	if (blocks) {
+		if (gfs2_is_jdata(ip))
+			gfs2_trans_remove_revoke(sdp, ap->start, blocks);
+		gfs2_alloc_consume_blocks(ap, blocks);
+		gfs2_add_inode_blocks(inode, blocks);
+		gfs2_trans_add_meta(ip->i_gl, mp->mp_bh[hgt]);
+	}
+	if (!ap->count)
+		return WALK_STOP;
+	return WALK_CONTINUE;
+}
+
+static int
+gfs2_alloc_data_blocks(struct inode *inode, struct metapath *mp,
+		       struct gfs2_alloc_parms *ap, u64 blocks,
+		       u64 *start, u64 *len)
+{
+	struct gfs2_alloc_walk_context ctx = {
+		.ap = ap,
+		.inode = inode,
+	};
+	struct gfs2_inode *ip = GFS2_I(inode);
+	struct metapath clone;
+	int ret;
+
+	if (!ap->count) {
+		ret = gfs2_alloc_blocks(ip, ap);
+		if (ret)
+			return ret;
+	}
+
+	*start = ap->start;
+	clone_metapath(&clone, mp);
+	ret = gfs2_walk_metadata(inode, &clone, blocks,
+				  gfs2_data_block_alloc, &ctx);
+	release_metapath(&clone);
+	*len = ap->start - *start;
+	return ret;
+}
+
 static inline void gfs2_indirect_init(struct metapath *mp,
 				      struct gfs2_glock *gl, unsigned int i,
 				      unsigned offset, u64 bn)
