@@ -1211,7 +1211,7 @@ const struct iomap_ops gfs2_iomap_ops = {
  * @inode: The inode
  * @lblock: The logical block number
  * @bh_map: The bh to be mapped
- * @create: True if its ok to alloc blocks to satify the request
+ * @create: Must be false.
  *
  * The size of the requested mapping is defined in bh_map->b_size.
  *
@@ -1221,8 +1221,7 @@ const struct iomap_ops gfs2_iomap_ops = {
  * successive blocks are mapped, up to the requested size.
  *
  * Sets buffer_boundary() if a read of metadata will be required
- * before the next block can be mapped. Sets buffer_new() if new
- * blocks were allocated.
+ * before the next block can be mapped.
  *
  * Returns: errno
  */
@@ -1236,15 +1235,15 @@ int gfs2_block_map(struct inode *inode, sector_t lblock,
 	struct iomap iomap = { };
 	int ret;
 
+	if (WARN_ON_ONCE(create))
+		return -EIO;
+
 	clear_buffer_mapped(bh_map);
 	clear_buffer_new(bh_map);
 	clear_buffer_boundary(bh_map);
 	trace_gfs2_bmap(ip, bh_map, lblock, create, 1);
 
-	if (!create)
-		ret = gfs2_iomap_get(inode, pos, length, &iomap);
-	else
-		ret = gfs2_iomap_alloc(inode, pos, length, &iomap);
+	ret = gfs2_iomap_get(inode, pos, length, &iomap);
 	if (ret)
 		goto out;
 
@@ -1257,8 +1256,6 @@ int gfs2_block_map(struct inode *inode, sector_t lblock,
 	bh_map->b_size = iomap.length;
 	if (iomap.flags & IOMAP_F_GFS2_BOUNDARY)
 		set_buffer_boundary(bh_map);
-	if (iomap.flags & IOMAP_F_NEW)
-		set_buffer_new(bh_map);
 
 out:
 	trace_gfs2_bmap(ip, bh_map, lblock, create, ret);
