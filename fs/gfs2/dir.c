@@ -190,12 +190,18 @@ static int gfs2_dir_write_data(struct gfs2_inode *ip, const char *buf,
 			amount = sdp->sd_sb.sb_bsize - o;
 
 		if (!extlen) {
-			extlen = 1;
-			error = gfs2_alloc_extent(inode, lblock, &dblock,
-						  &extlen, &new);
+			unsigned int blkbits = inode->i_blkbits;
+			struct iomap iomap = { };
+
+			error = gfs2_iomap_alloc(inode, lblock << blkbits, 1 << blkbits, &iomap);
 			if (error)
 				goto fail;
 			error = -EIO;
+			if (iomap.type != IOMAP_MAPPED)
+				goto fail;
+			dblock = iomap.addr >> blkbits;
+			new = iomap.flags & IOMAP_F_NEW;
+			extlen = 1;
 			if (gfs2_assert_withdraw(sdp, dblock))
 				goto fail;
 		}

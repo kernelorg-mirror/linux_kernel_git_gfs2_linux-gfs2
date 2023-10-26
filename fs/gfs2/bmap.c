@@ -1288,28 +1288,6 @@ int gfs2_get_extent(struct inode *inode, u64 lblock, u64 *dblock,
 	return 0;
 }
 
-int gfs2_alloc_extent(struct inode *inode, u64 lblock, u64 *dblock,
-		      unsigned int *extlen, bool *new)
-{
-	unsigned int blkbits = inode->i_blkbits;
-	struct iomap iomap = { };
-	unsigned int len;
-	int ret;
-
-	ret = gfs2_iomap_alloc(inode, lblock << blkbits, *extlen << blkbits,
-			       &iomap);
-	if (ret)
-		return ret;
-	if (iomap.type != IOMAP_MAPPED)
-		return -EIO;
-	*dblock = iomap.addr >> blkbits;
-	len = iomap.length >> blkbits;
-	if (len < *extlen)
-		*extlen = len;
-	*new = iomap.flags & IOMAP_F_NEW;
-	return 0;
-}
-
 /*
  * NOTE: Never call gfs2_block_zero_range with an open transaction because it
  * uses iomap write to perform its actions, which begin their own transactions
