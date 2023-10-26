@@ -152,7 +152,8 @@ static int gfs2_dir_write_stuffed(struct gfs2_inode *ip, const char *buf,
 static int gfs2_dir_write_data(struct gfs2_inode *ip, const char *buf,
 			       u64 offset, unsigned int size)
 {
-	struct gfs2_sbd *sdp = GFS2_SB(&ip->i_inode);
+	struct inode *inode = &ip->i_inode;
+	struct gfs2_sbd *sdp = GFS2_SB(inode);
 	struct buffer_head *dibh;
 	u64 lblock, dblock;
 	u32 extlen = 0;
@@ -190,7 +191,7 @@ static int gfs2_dir_write_data(struct gfs2_inode *ip, const char *buf,
 
 		if (!extlen) {
 			extlen = 1;
-			error = gfs2_alloc_extent(&ip->i_inode, lblock, &dblock,
+			error = gfs2_alloc_extent(inode, lblock, &dblock,
 						  &extlen, &new);
 			if (error)
 				goto fail;
@@ -225,9 +226,9 @@ out:
 	if (error)
 		return error;
 
-	if (ip->i_inode.i_size < offset + copied)
-		i_size_write(&ip->i_inode, offset + copied);
-	ip->i_inode.i_mtime = inode_set_ctime_current(&ip->i_inode);
+	if (inode->i_size < offset + copied)
+		i_size_write(inode, offset + copied);
+	inode->i_mtime = inode_set_ctime_current(inode);
 
 	gfs2_trans_add_meta(ip->i_gl, dibh);
 	gfs2_dinode_out(ip, dibh->b_data);
