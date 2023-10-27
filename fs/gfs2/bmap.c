@@ -752,10 +752,13 @@ static int __gfs2_iomap_alloc(struct inode *inode, struct iomap *iomap,
 	blks = dblks + iblks;
 	i = mp->mp_aheight;
 	do {
-		n = blks - alloced;
-		ret = gfs2_old_alloc_blocks(ip, &bn, &n);
+		struct gfs2_alloc_parms ap = { .target = blks - alloced, };
+
+		ret = gfs2_alloc_blocks(ip, &ap);
 		if (ret)
 			goto out;
+		bn = ap.start;
+		n = ap.count;
 		alloced += n;
 		if (state != ALLOC_DATA || gfs2_is_jdata(ip))
 			gfs2_trans_remove_revoke(sdp, bn, n);
