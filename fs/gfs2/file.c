@@ -376,35 +376,6 @@ static void gfs2_size_hint(struct file *filep, loff_t offset, size_t size)
 }
 
 /**
- * gfs2_allocate_page_backing - Allocate blocks for a write fault
- * @page: The (locked) page to allocate backing for
- * @length: Size of the allocation
- *
- * We try to allocate all the blocks required for the page in one go.  This
- * might fail for various reasons, so we keep trying until all the blocks to
- * back this page are allocated.  If some of the blocks are already allocated,
- * that is ok too.
- */
-static int gfs2_allocate_page_backing(struct page *page, unsigned int length)
-{
-	u64 pos = page_offset(page);
-
-	do {
-		struct iomap iomap = { };
-
-		if (gfs2_iomap_alloc(page->mapping->host, pos, length, &iomap))
-			return -EIO;
-
-		if (length < iomap.length)
-			iomap.length = length;
-		length -= iomap.length;
-		pos += iomap.length;
-	} while (length > 0);
-
-	return 0;
-}
-
-/**
  * gfs2_page_mkwrite - Make a shared, mmap()ed, page writable
  * @vmf: The virtual memory fault containing the page to become writable
  *
@@ -414,17 +385,12 @@ static int gfs2_allocate_page_backing(struct page *page, unsigned int length)
 
 static vm_fault_t gfs2_page_mkwrite(struct vm_fault *vmf)
 {
-	struct page *page = vmf->page;
+	struct folio *folio = page_folio(vmf->page);
 	struct inode *inode = file_inode(vmf->vma->vm_file);
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
-	struct gfs2_alloc_parms ap = {};
-	u64 offset = page_offset(page);
-	unsigned int data_blocks, ind_blocks, rblocks;
-	vm_fault_t ret = VM_FAULT_LOCKED;
 	struct gfs2_holder gh;
-	unsigned int length;
-	loff_t size;
+	vm_fault_t ret;
 	int err;
 
 	sb_start_pagefault(inode->i_sb);
@@ -436,113 +402,25 @@ static vm_fault_t gfs2_page_mkwrite(struct vm_fault *vmf)
 		goto out_uninit;
 	}
 
-	/* Check page index against inode size */
-	size = i_size_read(inode);
-	if (offset >= size) {
-		ret = VM_FAULT_SIGBUS;
-		goto out_unlock;
-	}
-
-	/* Update file times before taking page lock */
-	file_update_time(vmf->vma->vm_file);
-
-	/* page is wholly or partially inside EOF */
-	if (size - offset < PAGE_SIZE)
-		length = size - offset;
-	else
-		length = PAGE_SIZE;
-
-	gfs2_size_hint(vmf->vma->vm_file, offset, length);
-
-	set_bit(GLF_DIRTY, &ip->i_gl->gl_flags);
-	set_bit(GIF_SW_PAGED, &ip->i_flags);
-
-	/*
-	 * iomap_writepage / iomap_writepages currently don't support inline
-	 * files, so always unstuff here.
-	 */
-
-	if (!gfs2_is_stuffed(ip) &&
-	    !gfs2_write_alloc_required(ip, offset, length)) {
-		lock_page(page);
-		if (!PageUptodate(page) || page->mapping != inode->i_mapping) {
-			ret = VM_FAULT_NOPAGE;
-			unlock_page(page);
-		}
-		goto out_unlock;
-	}
-
 	err = gfs2_rindex_update(sdp);
 	if (err) {
 		ret = vmf_fs_error(err);
 		goto out_unlock;
 	}
 
-	gfs2_write_calc_reserv(ip, length, &data_blocks, &ind_blocks);
-	ap.target = data_blocks + ind_blocks;
-	err = gfs2_quota_lock_check(ip, &ap);
-	if (err) {
-		ret = vmf_fs_error(err);
-		goto out_unlock;
-	}
-	err = gfs2_inplace_reserve(ip, &ap);
-	if (err) {
-		ret = vmf_fs_error(err);
-		goto out_quota_unlock;
-	}
+	gfs2_size_hint(vmf->vma->vm_file, folio_pos(folio), folio_size(folio));
 
-	rblocks = RES_DINODE + ind_blocks;
-	if (gfs2_is_jdata(ip))
-		rblocks += data_blocks ? data_blocks : 1;
-	if (ind_blocks || data_blocks) {
-		rblocks += RES_STATFS + RES_QUOTA;
-		rblocks += gfs2_rg_blocks(ip, data_blocks + ind_blocks);
-	}
-	err = gfs2_trans_begin(sdp, rblocks, 0);
-	if (err) {
-		ret = vmf_fs_error(err);
-		goto out_trans_fail;
-	}
+	/* Update file times before taking page lock */
+	file_update_time(vmf->vma->vm_file);
 
-	/* Unstuff, if required, and allocate backing blocks for page */
-	if (gfs2_is_stuffed(ip)) {
-		err = gfs2_unstuff_dinode(ip);
-		if (err) {
-			ret = vmf_fs_error(err);
-			goto out_trans_end;
-		}
-	}
+	set_bit(GIF_SW_PAGED, &ip->i_flags);
 
-	lock_page(page);
-	/* If truncated, we must retry the operation, we may have raced
-	 * with the glock demotion code.
-	 */
-	if (!PageUptodate(page) || page->mapping != inode->i_mapping) {
-		ret = VM_FAULT_NOPAGE;
-		goto out_page_locked;
-	}
+	ret = iomap_page_mkwrite(vmf, &gfs2_iomap_ops);
 
-	err = gfs2_allocate_page_backing(page, length);
-	if (err)
-		ret = vmf_fs_error(err);
-
-out_page_locked:
-	if (ret != VM_FAULT_LOCKED)
-		unlock_page(page);
-out_trans_end:
-	gfs2_trans_end(sdp);
-out_trans_fail:
-	gfs2_inplace_release(ip);
-out_quota_unlock:
-	gfs2_quota_unlock(ip);
 out_unlock:
 	gfs2_glock_dq(&gh);
 out_uninit:
 	gfs2_holder_uninit(&gh);
-	if (ret == VM_FAULT_LOCKED) {
-		set_page_dirty(page);
-		wait_for_stable_page(page);
-	}
 	sb_end_pagefault(inode->i_sb);
 	return ret;
 }
