@@ -1413,8 +1413,11 @@ int gfs2_iomap_get(struct inode *inode, loff_t pos, loff_t length,
 int gfs2_iomap_alloc(struct inode *inode, loff_t pos, loff_t length,
 		     struct iomap *iomap)
 {
+	unsigned int blocksize = i_blocksize(inode);
 	struct metapath mp;
 	int ret;
+
+	BUG_ON(pos & (blocksize - 1) || length != blocksize);
 
 	ret = init_metapath(&mp, inode);
 	if (ret)
