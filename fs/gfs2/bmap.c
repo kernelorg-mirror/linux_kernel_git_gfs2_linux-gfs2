@@ -427,16 +427,16 @@ static int fillup_metapath(struct gfs2_inode *ip, struct metapath *mp, int h)
 	return mp->mp_aheight - x - 1;
 }
 
-static sector_t metapath_to_block(struct gfs2_sbd *sdp, struct metapath *mp)
+static u64 metapath_to_block(struct gfs2_sbd *sdp, struct metapath *mp)
 {
-	sector_t factor = 1, block = 0;
-	int hgt;
+	u64 block = mp->mp_list[0];
+	unsigned int hgt;
 
-	for (hgt = mp->mp_fheight - 1; hgt >= 0; hgt--) {
-		if (hgt < mp->mp_aheight)
-			block += mp->mp_list[hgt] * factor;
-		factor *= sdp->sd_inptrs;
+	for (hgt = 1; hgt < mp->mp_aheight; hgt++) {
+		block *= sdp->sd_inptrs;
+		block += mp->mp_list[hgt];
 	}
+	block *= sdp->sd_inptrs * (mp->mp_fheight - mp->mp_aheight);
 	return block;
 }
 
