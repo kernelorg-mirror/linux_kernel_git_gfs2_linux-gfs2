@@ -468,33 +468,6 @@ static void release_metapath(struct metapath *mp)
 	mp->mp_owned_bhs = 0;
 }
 
-/**
- * gfs2_extent_length - Returns length of an extent of blocks
- * @bh: The metadata block
- * @ptr: Current position in @bh
- * @eob: Set to 1 if we hit "end of block"
- *
- * Returns: The length of the extent (minimum of one block)
- */
-
-static inline unsigned int gfs2_extent_length(struct buffer_head *bh, __be64 *ptr, int *eob)
-{
-	const __be64 *end = (__be64 *)(bh->b_data + bh->b_size);
-	const __be64 *first = ptr;
-	u64 d = be64_to_cpu(*ptr);
-
-	*eob = 0;
-	do {
-		ptr++;
-		if (ptr >= end)
-			break;
-		d++;
-	} while(be64_to_cpu(*ptr) == d);
-	if (ptr >= end)
-		*eob = 1;
-	return ptr - first;
-}
-
 #define WALK_STOP 0
 #define WALK_FOLLOW 1
 #define WALK_CONTINUE 2
@@ -603,6 +576,60 @@ fill_up_metapath:
 			do_div(factor, sdp->sd_inptrs);
 		mp->mp_aheight = hgt + 1;
 	}
+	return 0;
+}
+
+static int
+gfs2_extent_walker(struct metapath *mp, unsigned int ptrs, void *data)
+{
+	u64 lblock = *(u64 *)data;
+	const __be64 *start, *ptr, *end;
+	unsigned int hgt;
+
+	if (mp->mp_aheight != mp->mp_fheight)
+		return WALK_STOP;
+
+	hgt = mp->mp_aheight - 1;
+	start = metapointer(hgt, mp);
+	end = start + ptrs;
+
+	for (ptr = start; ptr < end; ptr++, lblock++) {
+		if (*ptr != lblock) {
+			*(u64 *)data = lblock;
+			return WALK_STOP;
+		}
+	}
+	*(u64 *)data = lblock;
+	return WALK_CONTINUE;
+}
+
+/**
+ * gfs2_extent_length - compute the length of an extent
+ * @inode: The inode
+ * @mp: The metapath at lblock
+ * @len: How far to look (in blocks)
+ * @extent_length: The length of the extent (at least one block)
+ *
+ * Returns: errno or 0
+ */
+static int
+gfs2_extent_length(struct inode *inode, struct metapath *mp, u64 len,
+		   u64 *extent_length)
+{
+	const __be64 *start;
+	unsigned int hgt;
+	u64 lblock;
+	int ret;
+
+	hgt = mp->mp_aheight - 1;
+	start = metapointer(hgt, mp);
+	lblock = be64_to_cpu(*start);
+	BUG_ON(lblock == 0);
+
+	ret = gfs2_walk_metadata(inode, mp, len, gfs2_extent_walker, &lblock);
+	if (ret)
+		return ret;
+	*extent_length = lblock - be64_to_cpu(*start);
 	return 0;
 }
 
@@ -1163,9 +1190,7 @@ static int __gfs2_iomap_get(struct inode *inode, loff_t pos, loff_t length,
 	sector_t lblock;
 	sector_t lblock_stop;
 	int ret = 0;
-	int eob;
 	u64 len;
-	struct buffer_head *bh;
 	u8 height;
 
 	if (!length)
@@ -1227,15 +1252,14 @@ unstuff:
 	if (*ptr == 0)
 		goto do_alloc;
 
-	bh = mp->mp_bh[ip->i_height - 1];
-	len = gfs2_extent_length(bh, ptr, &eob);
+	ret = gfs2_extent_length(inode, mp, len, &len);
+	if (ret)
+		goto unlock;
 
 	iomap->addr = be64_to_cpu(*ptr) << inode->i_blkbits;
 	iomap->length = len << inode->i_blkbits;
 	iomap->type = IOMAP_MAPPED;
 	iomap->flags |= IOMAP_F_MERGED;
-	if (eob)
-		iomap->flags |= IOMAP_F_GFS2_BOUNDARY;
 
 out:
 	iomap->bdev = inode->i_sb->s_bdev;
