@@ -1641,9 +1641,6 @@ const struct iomap_ops gfs2_iomap_ops = {
  * bh_map->b_size to indicate the size of the mapping when @lblock and
  * successive blocks are mapped, up to the requested size.
  *
- * Sets buffer_boundary() if a read of metadata will be required
- * before the next block can be mapped.
- *
  * Returns: errno
  */
 
@@ -1661,22 +1658,17 @@ int gfs2_block_map(struct inode *inode, sector_t lblock,
 
 	clear_buffer_mapped(bh_map);
 	clear_buffer_new(bh_map);
-	clear_buffer_boundary(bh_map);
 	trace_gfs2_bmap(ip, bh_map, lblock, create, 1);
 
 	ret = gfs2_iomap_get(inode, pos, length, &iomap);
 	if (ret)
 		goto out;
 
-	if (iomap.length > bh_map->b_size) {
+	if (iomap.length > bh_map->b_size)
 		iomap.length = bh_map->b_size;
-		iomap.flags &= ~IOMAP_F_GFS2_BOUNDARY;
-	}
 	if (iomap.addr != IOMAP_NULL_ADDR)
 		map_bh(bh_map, inode->i_sb, iomap.addr >> inode->i_blkbits);
 	bh_map->b_size = iomap.length;
-	if (iomap.flags & IOMAP_F_GFS2_BOUNDARY)
-		set_buffer_boundary(bh_map);
 
 out:
 	trace_gfs2_bmap(ip, bh_map, lblock, create, ret);

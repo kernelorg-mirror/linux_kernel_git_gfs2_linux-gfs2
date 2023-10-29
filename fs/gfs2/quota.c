@@ -784,9 +784,6 @@ static int gfs2_write_buf_to_page(struct gfs2_sbd *sdp, unsigned long index,
 			clear_buffer_new(bh);
 			if (iomap.flags & IOMAP_F_NEW)
 				set_buffer_new(bh);
-			clear_buffer_boundary(bh);
-			if (iomap.flags & IOMAP_F_GFS2_BOUNDARY)
-				set_buffer_boundary(bh);
 
 			/* If it's a newly allocated disk block, zero it */
 			if (buffer_new(bh))

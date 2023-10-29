@@ -15,8 +15,6 @@ struct inode;
 struct gfs2_inode;
 struct page;
 
-#define IOMAP_F_GFS2_BOUNDARY IOMAP_F_PRIVATE
-
 /**
  * gfs2_write_calc_reserv - calculate number of blocks needed to write to a file
  * @ip: the file
