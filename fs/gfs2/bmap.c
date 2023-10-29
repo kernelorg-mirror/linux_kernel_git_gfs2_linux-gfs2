@@ -624,17 +624,14 @@ gfs2_hole_walker(struct metapath *mp, unsigned int ptrs, void *data)
  * @lblock: The logical starting block number
  * @len: How far to look (in blocks)
  * @mp: The metapath at lblock
- * @iomap: The iomap to store the hole size in
- *
- * This function modifies @mp.
+ * @hole_size: The size of the hole (out)
  *
  * Returns: errno on error
  */
 static int gfs2_hole_size(struct inode *inode, sector_t lblock, u64 len,
-			  struct metapath *mp, struct iomap *iomap)
+			  struct metapath *mp, u64 *hole_size)
 {
 	struct metapath clone;
-	u64 hole_size;
 	bool stopped = false;
 	int ret;
 
@@ -645,11 +642,9 @@ static int gfs2_hole_size(struct inode *inode, sector_t lblock, u64 len,
 		goto out;
 
 	if (stopped)
-		hole_size = metapath_to_block(GFS2_SB(inode), &clone) - lblock;
+		*hole_size = metapath_to_block(GFS2_SB(inode), &clone) - lblock;
 	else
-		hole_size = len;
-	iomap->length = hole_size << inode->i_blkbits;
-	ret = 0;
+		*hole_size = len;
 
 out:
 	release_metapath(&clone);
@@ -982,9 +977,10 @@ do_alloc:
 	if (flags & IOMAP_REPORT) {
 		if (pos >= size)
 			ret = -ENOENT;
-		else if (height == ip->i_height)
-			ret = gfs2_hole_size(inode, lblock, len, mp, iomap);
-		else
+		else if (height == ip->i_height) {
+			ret = gfs2_hole_size(inode, lblock, len, mp, &len);
+			iomap->length = len << inode->i_blkbits;
+		} else
 			iomap->length = size - iomap->offset;
 	} else if (flags & IOMAP_WRITE) {
 		u64 alloc_size;
@@ -997,8 +993,10 @@ do_alloc:
 		if (alloc_size < iomap->length)
 			iomap->length = alloc_size;
 	} else {
-		if (pos < size && height == ip->i_height)
-			ret = gfs2_hole_size(inode, lblock, len, mp, iomap);
+		if (pos < size && height == ip->i_height) {
+			ret = gfs2_hole_size(inode, lblock, len, mp, &len);
+			iomap->length = len << inode->i_blkbits;
+		}
 	}
 hole_found:
 	iomap->addr = IOMAP_NULL_ADDR;
