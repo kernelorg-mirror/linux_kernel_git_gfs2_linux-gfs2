@@ -1128,44 +1128,57 @@ out:
 /**
  * gfs2_alloc_size - Compute the maximum allocation size
  * @inode: The inode
- * @mp: The metapath
  * @lblock: The logical starting block number
- * @size: Requested size in blocks
+ * @len: How far to look (in blocks)
+ * @mp: The metapath at @lblock
+ * @alloc_size: The maximum of the allocation (out)
  *
- * Compute the maximum size of the next allocation at @mp.
+ * Compute the maximum size of the next allocation at @lblock.
  *
- * Returns: size in blocks
+ * Returns: errno or 0
  */
-static u64 gfs2_alloc_size(struct inode *inode, struct metapath *mp,
-			   sector_t lblock, u64 size)
+static int
+gfs2_alloc_size(struct inode *inode, u64 lblock, u64 len, struct metapath *mp,
+		u64 *alloc_size)
 {
 	struct gfs2_inode *ip = GFS2_I(inode);
-	struct gfs2_sbd *sdp = GFS2_SB(inode);
-	const __be64 *first, *ptr, *end;
+	unsigned int height_growth = mp->mp_fheight - ip->i_height, hgt;
+	struct metapath clone;
+	int ret;
 
-	if (gfs2_is_stuffed(ip) || mp->mp_fheight != mp->mp_aheight) {
-		unsigned int maxsize;
-
-		/* Are we writing to the block resulting from unstuffing? */
-		if (gfs2_is_stuffed(ip) && lblock == 0 && inode->i_size != 0)
-			return 1;
-
-		maxsize = mp->mp_fheight > 1 ? sdp->sd_inptrs : sdp->sd_diptrs;
-		maxsize -= mp->mp_list[mp->mp_fheight - 1];
-		if (size > maxsize)
-			size = maxsize;
-		return size;
+	/*
+	 * Unstuffing is always done transparently.
+	 */
+	if (gfs2_is_stuffed(ip)) {
+		*alloc_size = len;
+		return 0;
 	}
 
-	first = metapointer(ip->i_height - 1, mp);
-	end = metaend(ip->i_height - 1, mp);
-	if (end - first > size)
-		end = first + size;
-	for (ptr = first; ptr < end; ptr++) {
-		if (*ptr)
-			break;
+	/*
+	 * If @mp points beyond the inode's current metadata tree, the
+	 * allocation is in the "hole" at the end of the file.
+	 */
+	for (hgt = 0; hgt < height_growth; hgt++) {
+		if (mp->mp_list[hgt]) {
+			*alloc_size = len;
+			return 0;
+		}
 	}
-	return ptr - first;
+
+	/*
+	 * Otherwise, create a metapath for the inode's current height and
+	 * compute the current hole size.
+	 */
+	clone_metapath(&clone, mp);
+	if (height_growth) {
+		BUG_ON(mp->mp_aheight);
+		for (hgt = 0; hgt < ip->i_height; hgt++)
+			clone.mp_list[hgt] = clone.mp_list[hgt + height_growth];
+		clone.mp_fheight = ip->i_height;
+	}
+	ret = gfs2_hole_size(inode, lblock, len, mp, alloc_size);
+	release_metapath(&clone);
+	return ret;
 }
 
 /**
@@ -1282,7 +1295,7 @@ do_alloc:
 		if (flags & IOMAP_DIRECT)
 			goto out;  /* (see gfs2_file_direct_write) */
 
-		len = gfs2_alloc_size(inode, mp, lblock, len);
+		ret = gfs2_alloc_size(inode, lblock, len, mp, &len);
 		alloc_size = len << inode->i_blkbits;
 		if (alloc_size < iomap->length)
 			iomap->length = alloc_size;
