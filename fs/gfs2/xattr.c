@@ -1400,8 +1400,8 @@ static int ea_dealloc_block(struct gfs2_inode *ip)
 	if (error)
 		return error;
 
-	error = gfs2_trans_begin(sdp, RES_RG_BIT + RES_DINODE + RES_STATFS +
-				 RES_QUOTA, 1);
+	error = gfs2_trans_begin(sdp, RES_RG_HDR + RES_RG_BIT + RES_DINODE +
+				 RES_STATFS + RES_QUOTA, 1);
 	if (error)
 		goto out_gunlock;
 

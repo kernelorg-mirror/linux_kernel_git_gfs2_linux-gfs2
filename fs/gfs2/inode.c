@@ -413,7 +413,8 @@ static int alloc_dinode(struct gfs2_inode *ip, struct gfs2_alloc_parms *ap)
 	if (error)
 		goto out_quota;
 
-	error = gfs2_trans_begin(sdp, (ap->target * RES_RG_BIT) + RES_STATFS + RES_QUOTA, 0);
+	error = gfs2_trans_begin(sdp, (ap->target * (RES_RG_HDR + RES_RG_BIT)) +
+				      RES_STATFS + RES_QUOTA, 0);
 	if (error)
 		goto out_ipreserv;
 
@@ -1195,7 +1196,8 @@ static int gfs2_unlink(struct inode *dir, struct dentry *dentry)
 	if (error)
 		goto out_gunlock;
 
-	error = gfs2_trans_begin(sdp, 2*RES_DINODE + 3*RES_LEAF + RES_RG_BIT, 0);
+	error = gfs2_trans_begin(sdp, 2 * RES_DINODE + 3 * RES_LEAF +
+				      RES_RG_HDR + RES_RG_BIT, 0);
 	if (error)
 		goto out_gunlock;
 

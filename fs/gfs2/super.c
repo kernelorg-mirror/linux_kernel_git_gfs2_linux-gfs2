@@ -1239,8 +1239,8 @@ static int gfs2_dinode_dealloc(struct gfs2_inode *ip)
 	if (error)
 		goto out_qs;
 
-	error = gfs2_trans_begin(sdp, RES_RG_BIT + RES_STATFS + RES_QUOTA,
-				 sdp->sd_jdesc->jd_blocks);
+	error = gfs2_trans_begin(sdp, RES_RG_HDR + RES_RG_BIT + RES_STATFS +
+				 RES_QUOTA, sdp->sd_jdesc->jd_blocks);
 	if (error)
 		goto out_rg_gunlock;
 
