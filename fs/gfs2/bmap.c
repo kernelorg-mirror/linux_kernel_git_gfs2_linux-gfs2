@@ -1199,6 +1199,7 @@ static int __gfs2_iomap_get(struct inode *inode, loff_t pos, loff_t length,
 	struct gfs2_inode *ip = GFS2_I(inode);
 	struct gfs2_sbd *sdp = GFS2_SB(inode);
 	loff_t size = i_size_read(inode);
+	u64 max_write_length;
 	__be64 *ptr;
 	sector_t lblock;
 	sector_t lblock_stop;
@@ -1241,6 +1242,11 @@ static int __gfs2_iomap_get(struct inode *inode, loff_t pos, loff_t length,
 	}
 
 unstuff:
+	/* Arbitrarily limit the size of writes. */
+	max_write_length = gfs2_is_jdata(ip) ? SZ_1M : SZ_64M;
+	if (length > max_write_length)
+		length = max_write_length;
+
 	lblock = pos >> inode->i_blkbits;
 	iomap->offset = lblock << inode->i_blkbits;
 	lblock_stop = (pos + length - 1) >> inode->i_blkbits;
