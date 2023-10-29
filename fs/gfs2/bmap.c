@@ -1392,7 +1392,8 @@ gfs2_iomap_write_alloc(struct inode *inode,
 		blocks += unstuff_block + data_blocks;
 	if (inode == sdp->sd_rindex)
 		blocks += 2 * RES_STATFS;
-	blocks += gfs2_rg_blocks(ip, unstuff_block + data_blocks + ind_blocks);
+	blocks += RES_RG_HDR + RES_RG_BIT * (unstuff_block + ind_blocks +
+		  gfs2_rg_extent(inode, data_blocks));
 
 	revokes = unstuff_block + data_blocks;
 

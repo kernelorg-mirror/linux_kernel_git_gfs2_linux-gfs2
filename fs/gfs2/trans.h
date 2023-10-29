@@ -34,6 +34,24 @@ static inline unsigned int gfs2_rg_blocks(const struct gfs2_inode *ip, unsigned 
 	return rgd->rd_length;
 }
 
+/*
+ * gfs2_rg_extent - number of bitmap blocks for an extent
+ * @inode: The inode
+ * @blocks: The number of blocks to be allocated
+ *
+ * Compute the maximum number of bitmap blocks that allocating a single
+ * extent in a resource group will touch.
+ */
+static inline unsigned int
+gfs2_rg_extent(struct inode *inode, unsigned int blocks)
+{
+	unsigned int bsize = i_blocksize(inode);
+	unsigned int hdr_bits = (bsize - sizeof(struct gfs2_rgrp)) * GFS2_NBBY;
+	unsigned int bmap_bits = (bsize - sizeof(struct gfs2_meta_header)) * GFS2_NBBY;
+
+	return (blocks + hdr_bits + bmap_bits - 1) / bmap_bits;
+}
+
 int __gfs2_trans_begin(struct gfs2_trans *tr, struct gfs2_sbd *sdp,
 		       unsigned int blocks, unsigned int revokes,
 		       unsigned long ip);
