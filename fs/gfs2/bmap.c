@@ -931,6 +931,12 @@ gfs2_alloc_data_blocks(struct inode *inode, struct metapath *mp,
 	int ret;
 
 	if (!ap->count) {
+		/*
+		 * XXX When we were unstuffing, the file isn't empty, and we
+		 * are reading from the first block, don't do another
+		 * allocation here because the first block would then end up in
+		 * a separate extent!
+		 */
 		ret = gfs2_alloc_blocks(ip, ap);
 		if (ret)
 			return ret;
@@ -1377,6 +1383,7 @@ gfs2_iomap_write_alloc(struct inode *inode,
 	ind_blocks = max_indirect_blocks(inode, mp->mp_fheight, start, data_blocks);
 	unstuff_block = gfs2_is_stuffed(ip) && i_size_read(inode) && start > 0;
 	ap.target = unstuff_block + data_blocks + ind_blocks;
+	/* XXX Also set ap.min_target reasonably? */
 	ret = gfs2_quota_lock_check(ip, &ap);
 	if (ret)
 		goto out;
