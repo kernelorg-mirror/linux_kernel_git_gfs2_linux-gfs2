@@ -47,6 +47,7 @@
 
 #define show_glock_flags(flags) __print_flags(flags, "",	\
 	{(1UL << GLF_LOCK),			"l" },		\
+	{(1UL << GLF_REQUEST_DEMOTE),		"Q" },		\
 	{(1UL << GLF_DEMOTE),			"D" },		\
 	{(1UL << GLF_PENDING_DEMOTE),		"d" },		\
 	{(1UL << GLF_DEMOTE_IN_PROGRESS),	"p" },		\

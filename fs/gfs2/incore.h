@@ -334,6 +334,7 @@ enum {
 	GLF_DEFER_DELETE		= 20, /* iopen glocks only */
 	GLF_CANCELING			= 21,
 	GLF_DROP_REF			= 22,
+	GLF_REQUEST_DEMOTE		= 23,
 };
 
 #define GFS2_GLOCK_STATE								\

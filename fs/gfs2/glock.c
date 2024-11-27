@@ -61,8 +61,8 @@ struct gfs2_glock_iter {
 typedef void (*glock_examiner) (struct gfs2_glock * gl);
 
 static void do_xmote(struct gfs2_glock *gl, struct gfs2_holder *gh, unsigned int target);
-static void request_demote(struct gfs2_glock *gl, unsigned int state,
-			   unsigned long delay, bool remote);
+static void request_demote(struct gfs2_glock *gl, unsigned int state);
+static void request_demote_tail(struct gfs2_glock *gl,  bool remote);
 
 static struct dentry *gfs2_root;
 static LIST_HEAD(lru_list);
@@ -794,7 +794,7 @@ skip_inval:
 	    (target != LM_ST_UNLOCKED ||
 	     test_bit(SDF_WITHDRAW_RECOVERY, &sdp->sd_flags))) {
 		if (!is_system_glock(gl)) {
-			request_demote(gl, LM_ST_UNLOCKED, 0, false);
+			request_demote(gl, LM_ST_UNLOCKED);
 			/*
 			 * Ordinarily, we would call dlm and its callback would call
 			 * finish_xmote, which would call state_change() to the new state.
@@ -1088,6 +1088,8 @@ static void glock_work_func(struct work_struct *work)
 		finish_xmote(gl, gl->gl_reply);
 		drop_refs++;
 	}
+	if (test_and_clear_bit(GLF_REQUEST_DEMOTE, &gl->gl_flags))
+		request_demote_tail(gl, true);
 	if (test_bit(GLF_PENDING_DEMOTE, &gl->gl_flags) &&
 	    gl->gl_state != LM_ST_UNLOCKED &&
 	    gl->gl_demote_state != LM_ST_EXCLUSIVE) {
@@ -1451,23 +1453,41 @@ static void downgrade_demote_state(struct gfs2_glock *gl, unsigned int state)
  * request_demote - process a demote request
  * @gl: the glock
  * @state: the state the caller wants us to change to
- * @delay: zero to demote immediately; otherwise pending demote
- * @remote: true if this came from a different cluster node
  *
  * There are only two requests that we are going to see in actual
  * practise: LM_ST_SHARED and LM_ST_UNLOCKED
  */
 
-static void request_demote(struct gfs2_glock *gl, unsigned int state,
-			   unsigned long delay, bool remote)
+static void request_demote(struct gfs2_glock *gl, unsigned int state)
 {
-	gfs2_set_demote(delay ? GLF_PENDING_DEMOTE : GLF_DEMOTE, gl);
 	downgrade_demote_state(gl, state);
+	request_demote_tail(gl, false);
+}
+
+static void request_demote_tail(struct gfs2_glock *gl,  bool remote)
+{
+	unsigned long delay = 0;
+
 	if (!gl->gl_demote_time)
 		gl->gl_demote_time = jiffies;
 	if (gl->gl_ops->go_callback)
-		gl->gl_ops->go_callback(gl, remote);
-	trace_gfs2_demote_rq(gl, remote);
+		gl->gl_ops->go_callback(gl, true);
+	trace_gfs2_demote_rq(gl, true);
+
+	if (remote &&
+	    !list_empty(&gl->gl_holders) &&
+	    gl->gl_name.ln_type == LM_TYPE_INODE) {
+		unsigned long now = jiffies;
+		unsigned long holdtime;
+
+		holdtime = gl->gl_tchange + gl->gl_hold_time;
+
+		if (time_before(now, holdtime))
+			delay = holdtime - now;
+		if (test_bit(GLF_HAVE_REPLY, &gl->gl_flags))
+			delay = gl->gl_hold_time;
+	}
+	gfs2_set_demote(delay ? GLF_PENDING_DEMOTE : GLF_DEMOTE, gl);
 }
 
 void gfs2_print_dbg(struct seq_file *seq, const char *fmt, ...)
@@ -1646,7 +1666,7 @@ static void __gfs2_glock_dq(struct gfs2_holder *gh)
 	 * check below.
 	 */
 	if (gh->gh_flags & GL_NOCACHE)
-		request_demote(gl, LM_ST_UNLOCKED, 0, false);
+		request_demote(gl, LM_ST_UNLOCKED);
 
 	list_del_init(&gh->gh_list);
 	clear_bit(HIF_HOLDER, &gh->gh_iflags);
@@ -1884,25 +1904,12 @@ void gfs2_glock_dq_m(unsigned int num_gh, struct gfs2_holder *ghs)
 
 void gfs2_glock_cb(struct gfs2_glock *gl, unsigned int state)
 {
-	unsigned long delay = 0;
+	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
 
-	gfs2_glock_hold(gl);
-	spin_lock(&gl->gl_lockref.lock);
-	if (!list_empty(&gl->gl_holders) &&
-	    gl->gl_name.ln_type == LM_TYPE_INODE) {
-		unsigned long now = jiffies;
-		unsigned long holdtime;
-
-		holdtime = gl->gl_tchange + gl->gl_hold_time;
-
-		if (time_before(now, holdtime))
-			delay = holdtime - now;
-		if (test_bit(GLF_HAVE_REPLY, &gl->gl_flags))
-			delay = gl->gl_hold_time;
-	}
-	request_demote(gl, state, delay, true);
-	gfs2_glock_queue_work(gl, delay);
-	spin_unlock(&gl->gl_lockref.lock);
+	downgrade_demote_state(gl, state);
+	smp_mb__before_atomic();
+	if (!test_and_set_bit(GLF_REQUEST_DEMOTE, &gl->gl_flags))
+		queue_delayed_work(sdp->sd_glock_wq, &gl->gl_work, 0);
 }
 
 /**
@@ -2031,7 +2038,7 @@ add_back_to_lru:
 		freed++;
 		gl->gl_lockref.count++;
 		if (gl->gl_state != LM_ST_UNLOCKED)
-			request_demote(gl, LM_ST_UNLOCKED, 0, false);
+			request_demote(gl, LM_ST_UNLOCKED);
 		gfs2_glock_queue_work(gl, 0);
 		spin_unlock(&gl->gl_lockref.lock);
 		cond_resched_lock(&lru_lock);
@@ -2175,7 +2182,7 @@ static void clear_glock(struct gfs2_glock *gl)
 	if (!__lockref_is_dead(&gl->gl_lockref)) {
 		gl->gl_lockref.count++;
 		if (gl->gl_state != LM_ST_UNLOCKED)
-			request_demote(gl, LM_ST_UNLOCKED, 0, false);
+			request_demote(gl, LM_ST_UNLOCKED);
 		gfs2_glock_queue_work(gl, 0);
 	}
 	spin_unlock(&gl->gl_lockref.lock);
@@ -2337,6 +2344,8 @@ static const char *gflags2str(char *buf, const struct gfs2_glock *gl)
 
 	if (test_bit(GLF_LOCK, gflags))
 		*p++ = 'l';
+	if (test_bit(GLF_REQUEST_DEMOTE, gflags))
+		*p++ = 'Q';
 	if (test_bit(GLF_DEMOTE, gflags))
 		*p++ = 'D';
 	if (test_bit(GLF_PENDING_DEMOTE, gflags))
