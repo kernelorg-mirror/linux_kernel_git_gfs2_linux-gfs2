@@ -336,6 +336,31 @@ enum {
 	GLF_DROP_REF			= 22,
 };
 
+#define GFS2_GLOCK_STATE								\
+union {											\
+	struct {									\
+		unsigned int gl_state:2,	/* Current state */			\
+			     gl_target:2,	/* Target state */			\
+			     gl_demote_state:2,	/* State requested by remote node */	\
+			     gl_req:2,		/* State in last dlm request */		\
+			     gl_reply:8; 	/* Last reply from the dlm */		\
+	};										\
+	unsigned int gl_state_word;							\
+}
+
+#define GLOCK_SET_STATE(gl, field, value)						\
+({											\
+	GFS2_GLOCK_STATE old__, new__;							\
+											\
+	old__.gl_state_word = READ_ONCE((gl)->gl_state_word);				\
+	do {										\
+		new__.gl_state_word = old__.gl_state_word;				\
+		new__.field = value;							\
+	} while (!try_cmpxchg(&(gl)->gl_state_word,					\
+			      &old__.gl_state_word,					\
+			      new__.gl_state_word));					\
+})
+
 struct gfs2_glock {
 	unsigned long gl_flags;		/* GLF_... */
 	struct lm_lockname gl_name;
@@ -343,11 +368,7 @@ struct gfs2_glock {
 	struct lockref gl_lockref;
 
 	/* State fields protected by gl_lockref.lock */
-	unsigned int gl_state:2,	/* Current state */
-		     gl_target:2,	/* Target state */
-		     gl_demote_state:2,	/* State requested by remote node */
-		     gl_req:2,		/* State in last dlm request */
-		     gl_reply:8;	/* Last reply from the dlm */
+	GFS2_GLOCK_STATE;
 
 	unsigned long gl_demote_time; /* time of first demote request */
 	long gl_hold_time;

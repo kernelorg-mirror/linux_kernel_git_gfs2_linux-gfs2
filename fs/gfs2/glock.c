@@ -562,7 +562,7 @@ static void state_change(struct gfs2_glock *gl, unsigned int new_state)
 		/* shorten our minimum hold time */
 		gl->gl_hold_time = max(gl->gl_hold_time - GL_GLOCK_HOLD_DECR,
 				       GL_GLOCK_MIN_HOLD);
-	gl->gl_state = new_state;
+	GLOCK_SET_STATE(gl, gl_state, new_state);
 	gl->gl_tchange = jiffies;
 }
 
@@ -577,7 +577,7 @@ static void gfs2_set_demote(int nr, struct gfs2_glock *gl)
 
 static void gfs2_demote_wake(struct gfs2_glock *gl)
 {
-	gl->gl_demote_state = LM_ST_EXCLUSIVE;
+	GLOCK_SET_STATE(gl, gl_demote_state, LM_ST_EXCLUSIVE);
 	gl->gl_demote_time = 0;
 	clear_bit(GLF_DEMOTE, &gl->gl_flags);
 	smp_mb__after_atomic();
@@ -604,7 +604,7 @@ static void finish_xmote(struct gfs2_glock *gl, unsigned int ret)
 	/* Demote to UN request arrived during demote to SH or DF */
 	if (test_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags) &&
 	    state != LM_ST_UNLOCKED && gl->gl_demote_state == LM_ST_UNLOCKED)
-		gl->gl_target = LM_ST_UNLOCKED;
+		GLOCK_SET_STATE(gl, gl_target, LM_ST_UNLOCKED);
 
 	/* Check for state != intended state */
 	if (unlikely(state != gl->gl_target)) {
@@ -614,10 +614,10 @@ static void finish_xmote(struct gfs2_glock *gl, unsigned int ret)
 			if (ret & LM_OUT_CANCELED) {
 				list_del_init(&gh->gh_list);
 				trace_gfs2_glock_queue(gh, 0);
-				gl->gl_target = gl->gl_state;
+				GLOCK_SET_STATE(gl, gl_target, gl->gl_state);
 				gh = find_first_waiter(gl);
 				if (gh) {
-					gl->gl_target = gh->gh_state;
+					GLOCK_SET_STATE(gl, gl_target, gh->gh_state);
 					if (do_promote(gl))
 						goto out;
 					do_xmote(gl, gh, gl->gl_target);
@@ -628,7 +628,7 @@ static void finish_xmote(struct gfs2_glock *gl, unsigned int ret)
 			/* Some error or failed "try lock" - report it */
 			if ((ret & LM_OUT_ERROR) ||
 			    (gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB))) {
-				gl->gl_target = gl->gl_state;
+				GLOCK_SET_STATE(gl, gl_target, gl->gl_state);
 				do_error(gl, ret);
 				goto out;
 			}
@@ -721,7 +721,7 @@ __acquires(&gl->gl_lockref.lock)
 			return;
 		do_error(gl, 0); /* Fail queued try locks */
 	}
-	gl->gl_req = target;
+	GLOCK_SET_STATE(gl, gl_req, target);
 	set_bit(GLF_BLOCKING, &gl->gl_flags);
 	if ((gl->gl_req == LM_ST_UNLOCKED) ||
 	    (gl->gl_state == LM_ST_EXCLUSIVE) ||
@@ -874,7 +874,7 @@ __acquires(&gl->gl_lockref.lock)
 			goto out_sched;
 		set_bit(GLF_DEMOTE_IN_PROGRESS, &gl->gl_flags);
 		GLOCK_BUG_ON(gl, gl->gl_demote_state == LM_ST_EXCLUSIVE);
-		gl->gl_target = gl->gl_demote_state;
+		GLOCK_SET_STATE(gl, gl_target, gl->gl_demote_state);
 		do_xmote(gl, NULL, gl->gl_target);
 		return;
 	} else {
@@ -885,7 +885,7 @@ __acquires(&gl->gl_lockref.lock)
 		gh = find_first_waiter(gl);
 		if (!gh)
 			goto out_unlock;
-		gl->gl_target = gh->gh_state;
+		GLOCK_SET_STATE(gl, gl_target, gh->gh_state);
 		if (!(gh->gh_flags & (LM_FLAG_TRY | LM_FLAG_TRY_1CB)))
 			do_error(gl, 0); /* Fail queued try locks */
 		do_xmote(gl, gh, gl->gl_target);
@@ -1431,6 +1431,22 @@ out:
 	return ret;
 }
 
+static void downgrade_demote_state(struct gfs2_glock *gl, unsigned int state)
+{
+	GFS2_GLOCK_STATE old__, new__;
+
+	old__.gl_state_word = READ_ONCE((gl)->gl_state_word);
+	do {
+		new__.gl_state_word = old__.gl_state_word;
+		if (old__.gl_demote_state == LM_ST_EXCLUSIVE)
+			new__.gl_demote_state = state;
+		else if (old__.gl_demote_state != state)
+			new__.gl_demote_state = LM_ST_UNLOCKED;
+	} while (!try_cmpxchg(&(gl)->gl_state_word,
+			      &old__.gl_state_word,
+			      new__.gl_state_word));
+}
+
 /**
  * request_demote - process a demote request
  * @gl: the glock
@@ -1446,12 +1462,7 @@ static void request_demote(struct gfs2_glock *gl, unsigned int state,
 			   unsigned long delay, bool remote)
 {
 	gfs2_set_demote(delay ? GLF_PENDING_DEMOTE : GLF_DEMOTE, gl);
-	if (gl->gl_demote_state == LM_ST_EXCLUSIVE) {
-		gl->gl_demote_state = state;
-	} else if (gl->gl_demote_state != LM_ST_UNLOCKED &&
-			gl->gl_demote_state != state) {
-		gl->gl_demote_state = LM_ST_UNLOCKED;
-	}
+	downgrade_demote_state(gl, state);
 	if (!gl->gl_demote_time)
 		gl->gl_demote_time = jiffies;
 	if (gl->gl_ops->go_callback)
@@ -1939,7 +1950,7 @@ void gfs2_glock_complete(struct gfs2_glock *gl, int ret)
 
 	spin_lock(&gl->gl_lockref.lock);
 	clear_bit(GLF_PENDING_REPLY, &gl->gl_flags);
-	gl->gl_reply = ret;
+	GLOCK_SET_STATE(gl, gl_reply, ret);
 
 	if (unlikely(test_bit(DFL_BLOCK_LOCKS, &ls->ls_recover_flags))) {
 		if (gfs2_should_freeze(gl)) {
