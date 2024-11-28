@@ -816,6 +816,7 @@ skip_inval:
 	}
 
 	if (ls->ls_ops->lm_lock) {
+		gl->gl_lockref.count++;
 		set_bit(GLF_PENDING_REPLY, &gl->gl_flags);
 		spin_unlock(&gl->gl_lockref.lock);
 		ret = ls->ls_ops->lm_lock(gl, target, lck_flags);
@@ -836,6 +837,8 @@ skip_inval:
 			return;
 		}
 		clear_bit(GLF_PENDING_REPLY, &gl->gl_flags);
+		GLOCK_BUG_ON(gl, gl->gl_lockref.count < 2);
+		gl->gl_lockref.count--;
 	}
 
 	/* Complete the operation now. */
@@ -1946,7 +1949,6 @@ void gfs2_glock_complete(struct gfs2_glock *gl, int ret)
 		}
 	}
 
-	gl->gl_lockref.count++;
 	set_bit(GLF_HAVE_REPLY, &gl->gl_flags);
 	gfs2_glock_queue_work(gl, 0);
 	spin_unlock(&gl->gl_lockref.lock);
