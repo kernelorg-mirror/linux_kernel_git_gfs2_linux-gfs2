@@ -1954,22 +1954,20 @@ static int gfs2_should_freeze(const struct gfs2_glock *gl)
 void gfs2_glock_complete(struct gfs2_glock *gl, int ret)
 {
 	struct lm_lockstruct *ls = &gl->gl_name.ln_sbd->sd_lockstruct;
+	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
 
-	spin_lock(&gl->gl_lockref.lock);
 	clear_bit(GLF_PENDING_REPLY, &gl->gl_flags);
 	GLOCK_SET_STATE(gl, gl_reply, ret);
 
 	if (unlikely(test_bit(DFL_BLOCK_LOCKS, &ls->ls_recover_flags))) {
 		if (gfs2_should_freeze(gl)) {
 			set_bit(GLF_HAVE_FROZEN_REPLY, &gl->gl_flags);
-			spin_unlock(&gl->gl_lockref.lock);
 			return;
 		}
 	}
-
+	smp_mb__before_atomic();
 	set_bit(GLF_HAVE_REPLY, &gl->gl_flags);
-	gfs2_glock_queue_work(gl, 0);
-	spin_unlock(&gl->gl_lockref.lock);
+	queue_delayed_work(sdp->sd_glock_wq, &gl->gl_work, 0);
 }
 
 static int glock_cmp(void *priv, const struct list_head *a,
