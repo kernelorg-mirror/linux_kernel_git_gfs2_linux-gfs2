@@ -66,7 +66,8 @@
 	{(1UL << GLF_TRY_TO_EVICT),		"e" },		\
 	{(1UL << GLF_VERIFY_DELETE),		"E" },		\
 	{(1UL << GLF_DEFER_DELETE),		"s" },		\
-	{(1UL << GLF_CANCELING),		"C" })
+	{(1UL << GLF_CANCELING),		"C" },		\
+	{(1UL << GLF_DROP_REF),			"P" })
 
 #ifndef NUMPTY
 #define NUMPTY

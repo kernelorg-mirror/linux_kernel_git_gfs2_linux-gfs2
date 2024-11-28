@@ -247,16 +247,13 @@ static void gfs2_glock_remove_from_lru(struct gfs2_glock *gl)
 static void gfs2_glock_queue_work(struct gfs2_glock *gl, unsigned long delay) {
 	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
 
-	if (!queue_delayed_work(sdp->sd_glock_wq, &gl->gl_work, delay)) {
-		/*
-		 * We are holding the lockref spinlock, and the work was still
-		 * queued above.  The queued work (glock_work_func) takes that
-		 * spinlock before dropping its glock reference(s), so it
-		 * cannot have dropped them in the meantime.
-		 */
+	if (test_bit(GLF_DROP_REF, &gl->gl_flags)) {
 		GLOCK_BUG_ON(gl, gl->gl_lockref.count < 2);
 		gl->gl_lockref.count--;
+		return;
 	}
+	set_bit(GLF_DROP_REF, &gl->gl_flags);
+	queue_delayed_work(sdp->sd_glock_wq, &gl->gl_work, delay);
 }
 
 static void __gfs2_glock_put(struct gfs2_glock *gl)
@@ -264,6 +261,8 @@ static void __gfs2_glock_put(struct gfs2_glock *gl)
 	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
 	struct address_space *mapping = gfs2_glock2aspace(gl);
 
+	GLOCK_BUG_ON(gl, test_bit(GLF_DROP_REF, &gl->gl_flags));
+	GLOCK_BUG_ON(gl, cancel_delayed_work(&gl->gl_work));
 	lockref_mark_dead(&gl->gl_lockref);
 	spin_unlock(&gl->gl_lockref.lock);
 	gfs2_glock_remove_from_lru(gl);
@@ -314,10 +313,14 @@ void gfs2_glock_put(struct gfs2_glock *gl)
  */
 void gfs2_glock_put_async(struct gfs2_glock *gl)
 {
+	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
+
 	if (__gfs2_glock_put_or_lock(gl))
 		return;
 
-	gfs2_glock_queue_work(gl, 0);
+	GLOCK_BUG_ON(gl, test_bit(GLF_DROP_REF, &gl->gl_flags));
+	set_bit(GLF_DROP_REF, &gl->gl_flags);
+	queue_delayed_work(sdp->sd_glock_wq, &gl->gl_work, 0);
 	spin_unlock(&gl->gl_lockref.lock);
 }
 
@@ -1070,9 +1073,13 @@ static void glock_work_func(struct work_struct *work)
 {
 	unsigned long delay = 0;
 	struct gfs2_glock *gl = container_of(work, struct gfs2_glock, gl_work.work);
-	unsigned int drop_refs = 1;
+	unsigned int drop_refs = 0;
 
 	spin_lock(&gl->gl_lockref.lock);
+	if (test_bit(GLF_DROP_REF, &gl->gl_flags)) {
+		clear_bit(GLF_DROP_REF, &gl->gl_flags);
+		drop_refs++;
+	}
 	if (test_bit(GLF_HAVE_REPLY, &gl->gl_flags)) {
 		clear_bit(GLF_HAVE_REPLY, &gl->gl_flags);
 		finish_xmote(gl, gl->gl_reply);
@@ -1095,10 +1102,12 @@ static void glock_work_func(struct work_struct *work)
 		}
 	}
 	run_queue(gl, 0);
-	if (delay) {
-		/* Keep one glock reference for the work we requeue. */
-		drop_refs--;
-		gfs2_glock_queue_work(gl, delay);
+	if (delay && !test_bit(GLF_DROP_REF, &gl->gl_flags)) {
+		struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
+
+		gl->gl_lockref.count++;
+		set_bit(GLF_DROP_REF, &gl->gl_flags);
+		queue_delayed_work(sdp->sd_glock_wq, &gl->gl_work, delay);
 	}
 
 	/* Drop the remaining glock references manually. */
@@ -2341,6 +2350,8 @@ static const char *gflags2str(char *buf, const struct gfs2_glock *gl)
 		*p++ = 'L';
 	if (gl->gl_object)
 		*p++ = 'o';
+	if (test_bit(GLF_DROP_REF, gflags))
+		*p++ = 'P';
 	if (test_bit(GLF_BLOCKING, gflags))
 		*p++ = 'b';
 	if (test_bit(GLF_UNLOCKED, gflags))
