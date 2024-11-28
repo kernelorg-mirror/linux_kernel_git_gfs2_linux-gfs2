@@ -575,6 +575,7 @@ static void gfs2_set_demote(int nr, struct gfs2_glock *gl)
 static void gfs2_demote_wake(struct gfs2_glock *gl)
 {
 	gl->gl_demote_state = LM_ST_EXCLUSIVE;
+	gl->gl_demote_time = 0;
 	clear_bit(GLF_DEMOTE, &gl->gl_flags);
 	smp_mb__after_atomic();
 	wake_up_bit(&gl->gl_flags, GLF_DEMOTE);
@@ -1435,11 +1436,12 @@ static void request_demote(struct gfs2_glock *gl, unsigned int state,
 	gfs2_set_demote(delay ? GLF_PENDING_DEMOTE : GLF_DEMOTE, gl);
 	if (gl->gl_demote_state == LM_ST_EXCLUSIVE) {
 		gl->gl_demote_state = state;
-		gl->gl_demote_time = jiffies;
 	} else if (gl->gl_demote_state != LM_ST_UNLOCKED &&
 			gl->gl_demote_state != state) {
 		gl->gl_demote_state = LM_ST_UNLOCKED;
 	}
+	if (!gl->gl_demote_time)
+		gl->gl_demote_time = jiffies;
 	if (gl->gl_ops->go_callback)
 		gl->gl_ops->go_callback(gl, remote);
 	trace_gfs2_demote_rq(gl, remote);
@@ -2380,7 +2382,7 @@ static const char *gflags2str(char *buf, const struct gfs2_glock *gl)
 void gfs2_dump_glock(struct seq_file *seq, struct gfs2_glock *gl, bool fsid)
 {
 	const struct gfs2_glock_operations *glops = gl->gl_ops;
-	unsigned long long dtime;
+	unsigned long long dtime = 0;
 	const struct gfs2_holder *gh;
 	char gflags_buf[32];
 	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
@@ -2395,10 +2397,10 @@ void gfs2_dump_glock(struct seq_file *seq, struct gfs2_glock *gl, bool fsid)
 	memset(fs_id_buf, 0, sizeof(fs_id_buf));
 	if (fsid && sdp) /* safety precaution */
 		sprintf(fs_id_buf, "fsid=%s: ", sdp->sd_fsname);
-	dtime = jiffies - gl->gl_demote_time;
-	dtime *= 1000000/HZ; /* demote time in uSec */
-	if (!test_bit(GLF_DEMOTE, &gl->gl_flags))
-		dtime = 0;
+	if (gl->gl_demote_time && test_bit(GLF_DEMOTE, &gl->gl_flags)) {
+		dtime = jiffies - gl->gl_demote_time;
+		dtime *= 1000000/HZ; /* demote time in uSec */
+	}
 	gfs2_print_dbg(seq, "%sG:  s:%s n:%u/%llx f:%s t:%s d:%s/%llu a:%d "
 		       "v:%d r:%d m:%ld p:%lu\n",
 		       fs_id_buf, state2str(gl->gl_state),
