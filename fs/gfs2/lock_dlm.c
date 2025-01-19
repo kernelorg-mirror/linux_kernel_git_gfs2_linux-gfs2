@@ -1343,7 +1343,7 @@ static int gdlm_mount(struct gfs2_sbd *sdp, const char *table)
 	memcpy(cluster, table, strlen(table) - strlen(fsname));
 	fsname++;
 
-	flags = DLM_LSFL_NEWEXCL;
+	flags = DLM_LSFL_NEWEXCL | DLM_LSFL_SOFTIRQ;
 
 	/*
 	 * create/join lockspace
