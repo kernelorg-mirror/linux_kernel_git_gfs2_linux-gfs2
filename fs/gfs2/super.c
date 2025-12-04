@@ -1177,6 +1177,14 @@ static enum evict_behavior gfs2_upgrade_iopen_glock(struct inode *inode)
 	struct gfs2_holder *gh = &ip->i_iopen_gh;
 	int error;
 
+	/*
+	 * We have to hold the inode glock exclusively to cover the gap between
+	 * releasing the shared hold on the iopen glock and taking it
+	 * exclusively. I'd rather do a shared -> exclusive conversion on the
+	 * iopen glock, but we can change that later. This is safe, just less
+	 * efficient.
+	 */
+
 	gh->gh_flags |= GL_NOCACHE;
 	gfs2_glock_dq_wait(gh);
 
@@ -1374,22 +1382,6 @@ clean:
 /**
  * gfs2_evict_inode - Remove an inode from cache
  * @inode: The inode to evict
- *
- * There are three cases to consider:
- * 1. i_nlink == 0, we are final opener (and must deallocate)
- * 2. i_nlink == 0, we are not the final opener (and cannot deallocate)
- * 3. i_nlink > 0
- *
- * If the fs is read only, then we have to treat all cases as per #3
- * since we are unable to do any deallocation. The inode will be
- * deallocated by the next read/write node to attempt an allocation
- * in the same resource group
- *
- * We have to (at the moment) hold the inodes main lock to cover
- * the gap between unlocking the shared lock on the iopen lock and
- * taking the exclusive lock. I'd rather do a shared -> exclusive
- * conversion on the iopen lock, but we can change that later. This
- * is safe, just less efficient.
  */
 
 static void gfs2_evict_inode(struct inode *inode)
