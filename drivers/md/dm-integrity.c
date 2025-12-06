@@ -1616,8 +1616,7 @@ static void dec_in_flight(struct dm_integrity_io *dio)
 			schedule_autocommit(ic);
 
 		bio = dm_bio_from_per_bio_data(dio, sizeof(struct dm_integrity_io));
-		if (unlikely(dio->bi_status) && !bio->bi_status)
-			bio->bi_status = dio->bi_status;
+		bio_set_status(bio, dio->bi_status);
 		if (likely(!bio->bi_status) && unlikely(bio_sectors(bio) != dio->range.n_sectors)) {
 			dio->range.logical_sector += dio->range.n_sectors;
 			bio_advance(bio, dio->range.n_sectors << SECTOR_SHIFT);

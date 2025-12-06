@@ -77,8 +77,7 @@ static inline void dmz_bio_endio(struct bio *bio, blk_status_t status)
 	struct dmz_bioctx *bioctx =
 		dm_per_bio_data(bio, sizeof(struct dmz_bioctx));
 
-	if (status != BLK_STS_OK && bio->bi_status == BLK_STS_OK)
-		bio->bi_status = status;
+	bio_set_status(bio, status);
 	if (bioctx->dev && bio->bi_status != BLK_STS_OK)
 		bioctx->dev->flags |= DMZ_CHECK_BDEV;
 

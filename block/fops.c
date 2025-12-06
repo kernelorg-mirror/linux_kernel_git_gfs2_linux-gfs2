@@ -135,8 +135,7 @@ static void blkdev_bio_end_io(struct bio *bio)
 	bool should_dirty = dio->flags & DIO_SHOULD_DIRTY;
 	bool is_sync = dio->flags & DIO_IS_SYNC;
 
-	if (bio->bi_status && !dio->bio.bi_status)
-		dio->bio.bi_status = bio->bi_status;
+	bio_set_status(&dio->bio, bio->bi_status);
 
 	if (bio_integrity(bio))
 		bio_integrity_unmap_user(bio);
