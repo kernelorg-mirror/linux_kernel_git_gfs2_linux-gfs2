@@ -627,8 +627,7 @@ static void write_callback(unsigned long error, void *context)
 	 * degrade the array.
 	 */
 	if (bio_op(bio) == REQ_OP_DISCARD) {
-		bio_set_status(bio, BLK_STS_NOTSUPP);
-		bio_endio(bio);
+		bio_endio_status(bio, BLK_STS_NOTSUPP);
 		return;
 	}
 

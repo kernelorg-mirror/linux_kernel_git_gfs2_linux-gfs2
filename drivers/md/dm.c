@@ -983,8 +983,7 @@ static void __dm_io_complete(struct dm_io *io, bool first_stage)
 		queue_io(md, bio);
 	} else {
 		/* done with normal IO or empty flush */
-		bio_set_status(bio, io_error);
-		bio_endio(bio);
+		bio_endio_status(bio, io_error);
 	}
 }
 

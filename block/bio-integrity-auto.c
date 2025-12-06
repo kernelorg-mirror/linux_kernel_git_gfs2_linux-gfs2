@@ -190,8 +190,7 @@ bool bio_integrity_prep(struct bio *bio)
 err_free_buf:
 	kfree(buf);
 err_end_io:
-	bio_set_status(bio, BLK_STS_RESOURCE);
-	bio_endio(bio);
+	bio_endio_status(bio, BLK_STS_RESOURCE);
 	return false;
 }
 EXPORT_SYMBOL(bio_integrity_prep);

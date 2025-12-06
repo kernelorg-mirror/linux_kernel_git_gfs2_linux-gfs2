@@ -653,8 +653,7 @@ xfs_zoned_writeback_submit(
 
 	ioend->io_bio.bi_end_io = xfs_end_bio;
 	if (error) {
-		bio_set_status(&ioend->io_bio, errno_to_blk_status(error));
-		bio_endio(&ioend->io_bio);
+		bio_endio_status(&ioend->io_bio, errno_to_blk_status(error));
 		return error;
 	}
 	xfs_zone_alloc_and_submit(ioend, &XFS_ZWPC(wpc)->open_zone);

@@ -2512,8 +2512,7 @@ static int dm_integrity_map_inline(struct dm_integrity_io *dio, bool from_map)
 	sector_t recalc_sector;
 
 	if (unlikely(bio_integrity(bio))) {
-		bio_set_status(bio, BLK_STS_NOTSUPP);
-		bio_endio(bio);
+		bio_endio_status(bio, BLK_STS_NOTSUPP);
 		return DM_MAPIO_SUBMITTED;
 	}
 
@@ -2534,8 +2533,7 @@ retry:
 			if (dio->payload_len > x_size) {
 				unsigned sectors = ((x_size - extra_size) / ic->tuple_size) << ic->sb->log2_sectors_per_block;
 				if (WARN_ON(!sectors || sectors >= bio_sectors(bio))) {
-					bio_set_status(bio, BLK_STS_NOTSUPP);
-					bio_endio(bio);
+					bio_endio_status(bio, BLK_STS_NOTSUPP);
 					return DM_MAPIO_SUBMITTED;
 				}
 				dm_accept_partial_bio(bio, sectors);
@@ -2593,8 +2591,7 @@ skip_spinlock:
 
 	bip = bio_integrity_alloc(bio, GFP_NOIO, 1);
 	if (IS_ERR(bip)) {
-		bio_set_status(bio, errno_to_blk_status(PTR_ERR(bip)));
-		bio_endio(bio);
+		bio_endio_status(bio, errno_to_blk_status(PTR_ERR(bip)));
 		return DM_MAPIO_SUBMITTED;
 	}
 
@@ -2615,8 +2612,7 @@ skip_spinlock:
 	ret = bio_integrity_add_page(bio, virt_to_page(dio->integrity_payload),
 					dio->payload_len, offset_in_page(dio->integrity_payload));
 	if (unlikely(ret != dio->payload_len)) {
-		bio_set_status(bio, BLK_STS_RESOURCE);
-		bio_endio(bio);
+		bio_endio_status(bio, BLK_STS_RESOURCE);
 		return DM_MAPIO_SUBMITTED;
 	}
 
@@ -2661,16 +2657,15 @@ static void dm_integrity_inline_recheck(struct work_struct *w)
 		bip = bio_integrity_alloc(outgoing_bio, GFP_NOIO, 1);
 		if (IS_ERR(bip)) {
 			bio_put(outgoing_bio);
-			bio_set_status(bio, errno_to_blk_status(PTR_ERR(bip)));
-			bio_endio(bio);
+			bio_endio_status(bio,
+					 errno_to_blk_status(PTR_ERR(bip)));
 			return;
 		}
 
 		r = bio_integrity_add_page(outgoing_bio, virt_to_page(dio->integrity_payload), ic->tuple_size, 0);
 		if (unlikely(r != ic->tuple_size)) {
 			bio_put(outgoing_bio);
-			bio_set_status(bio, BLK_STS_RESOURCE);
-			bio_endio(bio);
+			bio_endio_status(bio, BLK_STS_RESOURCE);
 			return;
 		}
 
@@ -2679,8 +2674,7 @@ static void dm_integrity_inline_recheck(struct work_struct *w)
 		r = submit_bio_wait(outgoing_bio);
 		if (unlikely(r != 0)) {
 			bio_put(outgoing_bio);
-			bio_set_status(bio, errno_to_blk_status(r));
-			bio_endio(bio);
+			bio_endio_status(bio, errno_to_blk_status(r));
 			return;
 		}
 		bio_put(outgoing_bio);
@@ -2693,8 +2687,7 @@ static void dm_integrity_inline_recheck(struct work_struct *w)
 			dm_audit_log_bio(DM_MSG_PREFIX, "integrity-checksum",
 				bio, dio->bio_details.bi_iter.bi_sector, 0);
 
-			bio_set_status(bio, BLK_STS_PROTECTION);
-			bio_endio(bio);
+			bio_endio_status(bio, BLK_STS_PROTECTION);
 			return;
 		}
 

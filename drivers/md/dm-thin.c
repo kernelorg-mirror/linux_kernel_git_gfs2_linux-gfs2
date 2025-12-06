@@ -422,8 +422,7 @@ static void end_discard(struct discard_op *op, int r)
 	 * Even if r is set, there could be sub discards in flight that we
 	 * need to wait for.
 	 */
-	bio_set_status(op->parent_bio, errno_to_blk_status(r));
-	bio_endio(op->parent_bio);
+	bio_endio_status(op->parent_bio, errno_to_blk_status(r));
 }
 
 /*----------------------------------------------------------------*/
@@ -2730,8 +2729,7 @@ static int thin_bio_map(struct dm_target *ti, struct bio *bio)
 	thin_hook_bio(tc, bio);
 
 	if (tc->requeue_mode) {
-		bio_set_status(bio, BLK_STS_DM_REQUEUE);
-		bio_endio(bio);
+		bio_endio_status(bio, BLK_STS_DM_REQUEUE);
 		return DM_MAPIO_SUBMITTED;
 	}
 

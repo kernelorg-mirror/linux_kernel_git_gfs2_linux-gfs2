@@ -1211,8 +1211,7 @@ drbd_request_prepare(struct drbd_device *device, struct bio *bio)
 		/* only pass the error to the upper layers.
 		 * if user cannot handle io errors, that's not our business. */
 		drbd_err(device, "could not kmalloc() req\n");
-		bio_set_status(bio, BLK_STS_RESOURCE);
-		bio_endio(bio);
+		bio_endio_status(bio, BLK_STS_RESOURCE);
 		return ERR_PTR(-ENOMEM);
 	}
 

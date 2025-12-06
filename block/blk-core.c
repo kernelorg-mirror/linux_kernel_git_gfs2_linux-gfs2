@@ -645,8 +645,7 @@ static void __submit_bio(struct bio *bio)
 	
 		if ((bio->bi_opf & REQ_POLLED) &&
 		    !(disk->queue->limits.features & BLK_FEAT_POLL)) {
-			bio_set_status(bio, BLK_STS_NOTSUPP);
-			bio_endio(bio);
+			bio_endio_status(bio, BLK_STS_NOTSUPP);
 		} else {
 			disk->fops->submit_bio(bio);
 		}
@@ -887,8 +886,7 @@ void submit_bio_noacct(struct bio *bio)
 not_supported:
 	status = BLK_STS_NOTSUPP;
 end_io:
-	bio_set_status(bio, status);
-	bio_endio(bio);
+	bio_endio_status(bio, status);
 }
 EXPORT_SYMBOL(submit_bio_noacct);
 

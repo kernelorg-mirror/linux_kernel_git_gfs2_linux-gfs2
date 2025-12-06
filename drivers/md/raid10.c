@@ -1665,9 +1665,8 @@ static int raid10_handle_discard(struct mddev *mddev, struct bio *bio)
 		split_size = stripe_size - remainder;
 		split = bio_split(bio, split_size, GFP_NOIO, &conf->bio_split);
 		if (IS_ERR(split)) {
-			bio_set_status(bio,
-				       errno_to_blk_status(PTR_ERR(split)));
-			bio_endio(bio);
+			bio_endio_status(bio,
+					 errno_to_blk_status(PTR_ERR(split)));
 			return 0;
 		}
 
@@ -1683,9 +1682,8 @@ static int raid10_handle_discard(struct mddev *mddev, struct bio *bio)
 		split_size = bio_sectors(bio) - remainder;
 		split = bio_split(bio, split_size, GFP_NOIO, &conf->bio_split);
 		if (IS_ERR(split)) {
-			bio_set_status(bio,
-				       errno_to_blk_status(PTR_ERR(split)));
-			bio_endio(bio);
+			bio_endio_status(bio,
+					 errno_to_blk_status(PTR_ERR(split)));
 			return 0;
 		}
 
@@ -3685,8 +3683,7 @@ static sector_t raid10_sync_request(struct mddev *mddev, sector_t sector_nr,
 			struct resync_pages *rp = get_resync_pages(bio);
 			page = resync_fetch_page(rp, page_idx);
 			if (WARN_ON(!bio_add_page(bio, page, len, 0))) {
-				bio_set_status(bio, BLK_STS_RESOURCE);
-				bio_endio(bio);
+				bio_endio_status(bio, BLK_STS_RESOURCE);
 				goto giveup;
 			}
 		}
@@ -4867,8 +4864,7 @@ read_more:
 			len = PAGE_SIZE;
 		for (bio = blist; bio ; bio = bio->bi_next) {
 			if (WARN_ON(!bio_add_page(bio, page, len, 0))) {
-				bio_set_status(bio, BLK_STS_RESOURCE);
-				bio_endio(bio);
+				bio_endio_status(bio, BLK_STS_RESOURCE);
 				return sectors_done;
 			}
 		}

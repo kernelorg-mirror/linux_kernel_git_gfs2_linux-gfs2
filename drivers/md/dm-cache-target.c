@@ -1856,8 +1856,7 @@ static void requeue_deferred_bios(struct cache *cache)
 	bio_list_merge_init(&bios, &cache->deferred_bios);
 
 	while ((bio = bio_list_pop(&bios))) {
-		bio_set_status(bio, BLK_STS_DM_REQUEUE);
-		bio_endio(bio);
+		bio_endio_status(bio, BLK_STS_DM_REQUEUE);
 		cond_resched();
 	}
 }

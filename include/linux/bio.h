@@ -392,17 +392,21 @@ static inline void bio_set_status(struct bio *bio, blk_status_t status)
 		WRITE_ONCE(bio->bi_status, status);
 }
 
+static inline void bio_endio_status(struct bio *bio, blk_status_t status)
+{
+	bio_set_status(bio, status);
+	bio_endio(bio);
+}
+
 static inline void bio_io_error(struct bio *bio)
 {
-	bio_set_status(bio, BLK_STS_IOERR);
-	bio_endio(bio);
+	bio_endio_status(bio, BLK_STS_IOERR);
 }
 
 static inline void bio_wouldblock_error(struct bio *bio)
 {
 	bio_set_flag(bio, BIO_QUIET);
-	bio_set_status(bio, BLK_STS_AGAIN);
-	bio_endio(bio);
+	bio_endio_status(bio, BLK_STS_AGAIN);
 }
 
 /*
