@@ -301,7 +301,7 @@ static void call_bio_endio(struct r1bio *r1_bio)
 	struct bio *bio = r1_bio->master_bio;
 
 	if (!test_bit(R1BIO_Uptodate, &r1_bio->state))
-		bio->bi_status = BLK_STS_IOERR;
+		bio_set_status(bio, BLK_STS_IOERR);
 
 	bio_endio(bio);
 }

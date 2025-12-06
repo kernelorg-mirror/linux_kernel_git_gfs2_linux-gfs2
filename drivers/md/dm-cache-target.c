@@ -1193,7 +1193,8 @@ static void mg_complete(struct dm_cache_migration *mg, bool success)
 				bio_set_status(mg->overwrite_bio,
 					       mg->k.input);
 			else
-				mg->overwrite_bio->bi_status = BLK_STS_IOERR;
+				bio_set_status(mg->overwrite_bio,
+					       BLK_STS_IOERR);
 			bio_endio(mg->overwrite_bio);
 		} else {
 			if (success)
@@ -1855,7 +1856,7 @@ static void requeue_deferred_bios(struct cache *cache)
 	bio_list_merge_init(&bios, &cache->deferred_bios);
 
 	while ((bio = bio_list_pop(&bios))) {
-		bio->bi_status = BLK_STS_DM_REQUEUE;
+		bio_set_status(bio, BLK_STS_DM_REQUEUE);
 		bio_endio(bio);
 		cond_resched();
 	}

@@ -2341,7 +2341,7 @@ static void zram_bio_read(struct zram *zram, struct bio *bio)
 
 		if (zram_bvec_read(zram, &bv, index, offset, bio) < 0) {
 			atomic64_inc(&zram->stats.failed_reads);
-			bio->bi_status = BLK_STS_IOERR;
+			bio_set_status(bio, BLK_STS_IOERR);
 			break;
 		}
 		flush_dcache_page(bv.bv_page);
@@ -2372,7 +2372,7 @@ static void zram_bio_write(struct zram *zram, struct bio *bio)
 
 		if (zram_bvec_write(zram, &bv, index, offset, bio) < 0) {
 			atomic64_inc(&zram->stats.failed_writes);
-			bio->bi_status = BLK_STS_IOERR;
+			bio_set_status(bio, BLK_STS_IOERR);
 			break;
 		}
 

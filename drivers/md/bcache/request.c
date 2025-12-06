@@ -1120,7 +1120,7 @@ static void detached_dev_do_request(struct bcache_device *d, struct bio *bio,
 	 */
 	ddip = kzalloc(sizeof(struct detached_dev_io_private), GFP_NOIO);
 	if (!ddip) {
-		bio->bi_status = BLK_STS_RESOURCE;
+		bio_set_status(bio, BLK_STS_RESOURCE);
 		bio->bi_end_io(bio);
 		return;
 	}

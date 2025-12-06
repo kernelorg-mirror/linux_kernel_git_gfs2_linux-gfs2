@@ -640,7 +640,7 @@ static void __submit_bio(struct bio *bio)
 	
 		if ((bio->bi_opf & REQ_POLLED) &&
 		    !(disk->queue->limits.features & BLK_FEAT_POLL)) {
-			bio->bi_status = BLK_STS_NOTSUPP;
+			bio_set_status(bio, BLK_STS_NOTSUPP);
 			bio_endio(bio);
 		} else {
 			disk->fops->submit_bio(bio);

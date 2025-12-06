@@ -170,7 +170,7 @@ aoe_failip(struct aoedev *d)
 
 	req = blk_mq_rq_to_pdu(rq);
 	while ((bio = d->ip.nxbio)) {
-		bio->bi_status = BLK_STS_IOERR;
+		bio_set_status(bio, BLK_STS_IOERR);
 		d->ip.nxbio = bio->bi_next;
 		req->nr_bios--;
 	}

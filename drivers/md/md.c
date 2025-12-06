@@ -447,7 +447,7 @@ static void md_submit_bio(struct bio *bio)
 
 	if (mddev->ro == MD_RDONLY && unlikely(rw == WRITE)) {
 		if (bio_sectors(bio) != 0)
-			bio->bi_status = BLK_STS_IOERR;
+			bio_set_status(bio, BLK_STS_IOERR);
 		bio_endio(bio);
 		return;
 	}

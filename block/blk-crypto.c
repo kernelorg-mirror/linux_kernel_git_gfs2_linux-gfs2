@@ -287,12 +287,12 @@ bool __blk_crypto_bio_prep(struct bio **bio_ptr)
 
 	/* Error if bio has no data. */
 	if (WARN_ON_ONCE(!bio_has_data(bio))) {
-		bio->bi_status = BLK_STS_IOERR;
+		bio_set_status(bio, BLK_STS_IOERR);
 		goto fail;
 	}
 
 	if (!bio_crypt_check_alignment(bio)) {
-		bio->bi_status = BLK_STS_INVAL;
+		bio_set_status(bio, BLK_STS_INVAL);
 		goto fail;
 	}
 

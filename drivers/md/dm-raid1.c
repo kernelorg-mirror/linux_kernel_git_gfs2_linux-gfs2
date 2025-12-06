@@ -491,9 +491,9 @@ static void hold_bio(struct mirror_set *ms, struct bio *bio)
 		 * If device is suspended, complete the bio.
 		 */
 		if (dm_noflush_suspending(ms->ti))
-			bio->bi_status = BLK_STS_DM_REQUEUE;
+			bio_set_status(bio, BLK_STS_DM_REQUEUE);
 		else
-			bio->bi_status = BLK_STS_IOERR;
+			bio_set_status(bio, BLK_STS_IOERR);
 
 		bio_endio(bio);
 		return;
@@ -627,7 +627,7 @@ static void write_callback(unsigned long error, void *context)
 	 * degrade the array.
 	 */
 	if (bio_op(bio) == REQ_OP_DISCARD) {
-		bio->bi_status = BLK_STS_NOTSUPP;
+		bio_set_status(bio, BLK_STS_NOTSUPP);
 		bio_endio(bio);
 		return;
 	}

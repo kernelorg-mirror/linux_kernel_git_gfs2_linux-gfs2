@@ -174,7 +174,7 @@ static void btrfs_end_repair_bio(struct btrfs_bio *repair_bbio,
 		mirror = next_repair_mirror(fbio, mirror);
 		if (mirror == fbio->bbio->mirror_num) {
 			btrfs_debug(fs_info, "no mirror left");
-			fbio->bbio->bio.bi_status = BLK_STS_IOERR;
+			bio_set_status(&fbio->bbio->bio, BLK_STS_IOERR);
 			goto done;
 		}
 
@@ -225,7 +225,7 @@ static struct btrfs_failed_bio *repair_one_sector(struct btrfs_bio *failed_bbio,
 	num_copies = btrfs_num_copies(fs_info, logical, sectorsize);
 	if (num_copies == 1) {
 		btrfs_debug(fs_info, "no copy to repair from");
-		failed_bbio->bio.bi_status = BLK_STS_IOERR;
+		bio_set_status(&failed_bbio->bio, BLK_STS_IOERR);
 		return fbio;
 	}
 
@@ -382,7 +382,7 @@ static void btrfs_orig_write_end_io(struct bio *bio)
 	 * threshold.
 	 */
 	if (atomic_read(&bioc->error) > bioc->max_errors)
-		bio->bi_status = BLK_STS_IOERR;
+		bio_set_status(bio, BLK_STS_IOERR);
 	else
 		bio->bi_status = BLK_STS_OK;
 

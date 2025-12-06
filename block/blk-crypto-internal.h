@@ -235,7 +235,7 @@ blk_crypto_fallback_start_using_mode(enum blk_crypto_mode_num mode_num)
 static inline bool blk_crypto_fallback_bio_prep(struct bio **bio_ptr)
 {
 	pr_warn_once("crypto API fallback disabled; failing request.\n");
-	(*bio_ptr)->bi_status = BLK_STS_NOTSUPP;
+	bio_set_status((*bio_ptr), BLK_STS_NOTSUPP);
 	return false;
 }
 

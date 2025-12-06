@@ -1143,7 +1143,7 @@ static void drbd_process_discard_or_zeroes_req(struct drbd_request *req, int fla
 	int err = drbd_issue_discard_or_zero_out(req->device,
 				req->i.sector, req->i.size >> 9, flags);
 	if (err)
-		req->private_bio->bi_status = BLK_STS_IOERR;
+		bio_set_status(req->private_bio, BLK_STS_IOERR);
 	bio_endio(req->private_bio);
 }
 
@@ -1211,7 +1211,7 @@ drbd_request_prepare(struct drbd_device *device, struct bio *bio)
 		/* only pass the error to the upper layers.
 		 * if user cannot handle io errors, that's not our business. */
 		drbd_err(device, "could not kmalloc() req\n");
-		bio->bi_status = BLK_STS_RESOURCE;
+		bio_set_status(bio, BLK_STS_RESOURCE);
 		bio_endio(bio);
 		return ERR_PTR(-ENOMEM);
 	}

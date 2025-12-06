@@ -980,7 +980,7 @@ bool blk_update_request(struct request *req, blk_status_t error,
 			 * as the BIO fragments may end up not being written
 			 * sequentially.
 			 */
-			bio->bi_status = BLK_STS_IOERR;
+			bio_set_status(bio, BLK_STS_IOERR);
 		}
 
 		/* Completion has already been traced */
@@ -3165,7 +3165,7 @@ void blk_mq_submit_bio(struct bio *bio)
 	}
 
 	if ((bio->bi_opf & REQ_POLLED) && !blk_mq_can_poll(q)) {
-		bio->bi_status = BLK_STS_NOTSUPP;
+		bio_set_status(bio, BLK_STS_NOTSUPP);
 		bio_endio(bio);
 		goto queue_exit;
 	}

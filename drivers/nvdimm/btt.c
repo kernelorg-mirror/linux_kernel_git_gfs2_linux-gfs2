@@ -1456,7 +1456,7 @@ static void btt_submit_bio(struct bio *bio)
 				len % btt->sector_size) {
 			dev_err_ratelimited(&btt->nd_btt->dev,
 				"unaligned bio segment (len: %d)\n", len);
-			bio->bi_status = BLK_STS_IOERR;
+			bio_set_status(bio, BLK_STS_IOERR);
 			break;
 		}
 

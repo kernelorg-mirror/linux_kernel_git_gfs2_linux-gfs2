@@ -324,7 +324,7 @@ static void raid_end_bio_io(struct r10bio *r10_bio)
 
 	if (!test_and_set_bit(R10BIO_Returned, &r10_bio->state)) {
 		if (!test_bit(R10BIO_Uptodate, &r10_bio->state))
-			bio->bi_status = BLK_STS_IOERR;
+			bio_set_status(bio, BLK_STS_IOERR);
 		bio_endio(bio);
 	}
 
@@ -3600,7 +3600,7 @@ static sector_t raid10_sync_request(struct mddev *mddev, sector_t sector_nr,
 				r10_bio->devs[i].repl_bio->bi_end_io = NULL;
 
 			bio = r10_bio->devs[i].bio;
-			bio->bi_status = BLK_STS_IOERR;
+			bio_set_status(bio, BLK_STS_IOERR);
 			rdev = conf->mirrors[d].rdev;
 			if (rdev == NULL || test_bit(Faulty, &rdev->flags))
 				continue;
@@ -3637,7 +3637,7 @@ static sector_t raid10_sync_request(struct mddev *mddev, sector_t sector_nr,
 
 			/* Need to set up for writing to the replacement */
 			bio = r10_bio->devs[i].repl_bio;
-			bio->bi_status = BLK_STS_IOERR;
+			bio_set_status(bio, BLK_STS_IOERR);
 
 			sector = r10_bio->devs[i].addr;
 			bio->bi_next = biolist;
@@ -3683,7 +3683,7 @@ static sector_t raid10_sync_request(struct mddev *mddev, sector_t sector_nr,
 			struct resync_pages *rp = get_resync_pages(bio);
 			page = resync_fetch_page(rp, page_idx);
 			if (WARN_ON(!bio_add_page(bio, page, len, 0))) {
-				bio->bi_status = BLK_STS_RESOURCE;
+				bio_set_status(bio, BLK_STS_RESOURCE);
 				bio_endio(bio);
 				goto giveup;
 			}
@@ -4865,7 +4865,7 @@ read_more:
 			len = PAGE_SIZE;
 		for (bio = blist; bio ; bio = bio->bi_next) {
 			if (WARN_ON(!bio_add_page(bio, page, len, 0))) {
-				bio->bi_status = BLK_STS_RESOURCE;
+				bio_set_status(bio, BLK_STS_RESOURCE);
 				bio_endio(bio);
 				return sectors_done;
 			}

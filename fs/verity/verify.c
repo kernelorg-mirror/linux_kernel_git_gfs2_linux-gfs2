@@ -432,7 +432,7 @@ void fsverity_verify_bio(struct bio *bio)
 
 ioerr:
 	fsverity_clear_pending_blocks(&ctx);
-	bio->bi_status = BLK_STS_IOERR;
+	bio_set_status(bio, BLK_STS_IOERR);
 }
 EXPORT_SYMBOL_GPL(fsverity_verify_bio);
 #endif /* CONFIG_BLOCK */

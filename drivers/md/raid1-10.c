@@ -104,7 +104,7 @@ static void md_bio_reset_resync_pages(struct bio *bio, struct resync_pages *rp,
 		int len = min_t(int, size, PAGE_SIZE);
 
 		if (WARN_ON(!bio_add_page(bio, page, len, 0))) {
-			bio->bi_status = BLK_STS_RESOURCE;
+			bio_set_status(bio, BLK_STS_RESOURCE);
 			bio_endio(bio);
 			return;
 		}

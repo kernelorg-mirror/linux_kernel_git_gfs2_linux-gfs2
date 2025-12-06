@@ -1265,7 +1265,7 @@ static void bio_copy_block(struct dm_writecache *wc, struct bio *bio, void *data
 			flush_dcache_page(bio_page(bio));
 			if (unlikely(r)) {
 				writecache_error(wc, r, "hardware memory error when reading data: %d", r);
-				bio->bi_status = BLK_STS_IOERR;
+				bio_set_status(bio, BLK_STS_IOERR);
 			}
 		} else {
 			flush_dcache_page(bio_page(bio));
@@ -1312,7 +1312,7 @@ static int writecache_flush_thread(void *data)
 			writecache_flush(wc);
 			wc_unlock(wc);
 			if (writecache_has_error(wc))
-				bio->bi_status = BLK_STS_IOERR;
+				bio_set_status(bio, BLK_STS_IOERR);
 			bio_endio(bio);
 		}
 	}

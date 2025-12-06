@@ -281,7 +281,7 @@ static bool blk_crypto_fallback_encrypt_bio(struct bio **bio_ptr)
 	/* Allocate bounce bio for encryption */
 	enc_bio = blk_crypto_fallback_clone_bio(src_bio);
 	if (!enc_bio) {
-		src_bio->bi_status = BLK_STS_RESOURCE;
+		bio_set_status(src_bio, BLK_STS_RESOURCE);
 		return false;
 	}
 
@@ -298,7 +298,7 @@ static bool blk_crypto_fallback_encrypt_bio(struct bio **bio_ptr)
 
 	/* and then allocate an skcipher_request for it */
 	if (!blk_crypto_fallback_alloc_cipher_req(slot, &ciph_req, &wait)) {
-		src_bio->bi_status = BLK_STS_RESOURCE;
+		bio_set_status(src_bio, BLK_STS_RESOURCE);
 		goto out_release_keyslot;
 	}
 
@@ -319,7 +319,7 @@ static bool blk_crypto_fallback_encrypt_bio(struct bio **bio_ptr)
 		enc_bvec->bv_page = ciphertext_page;
 
 		if (!ciphertext_page) {
-			src_bio->bi_status = BLK_STS_RESOURCE;
+			bio_set_status(src_bio, BLK_STS_RESOURCE);
 			goto out_free_bounce_pages;
 		}
 
@@ -334,7 +334,7 @@ static bool blk_crypto_fallback_encrypt_bio(struct bio **bio_ptr)
 			if (crypto_wait_req(crypto_skcipher_encrypt(ciph_req),
 					    &wait)) {
 				i++;
-				src_bio->bi_status = BLK_STS_IOERR;
+				bio_set_status(src_bio, BLK_STS_IOERR);
 				goto out_free_bounce_pages;
 			}
 			bio_crypt_dun_increment(curr_dun, 1);
@@ -401,7 +401,7 @@ static void blk_crypto_fallback_decrypt_bio(struct work_struct *work)
 
 	/* and then allocate an skcipher_request for it */
 	if (!blk_crypto_fallback_alloc_cipher_req(slot, &ciph_req, &wait)) {
-		bio->bi_status = BLK_STS_RESOURCE;
+		bio_set_status(bio, BLK_STS_RESOURCE);
 		goto out;
 	}
 
@@ -421,7 +421,7 @@ static void blk_crypto_fallback_decrypt_bio(struct work_struct *work)
 			blk_crypto_dun_to_iv(curr_dun, &iv);
 			if (crypto_wait_req(crypto_skcipher_decrypt(ciph_req),
 					    &wait)) {
-				bio->bi_status = BLK_STS_IOERR;
+				bio_set_status(bio, BLK_STS_IOERR);
 				goto out;
 			}
 			bio_crypt_dun_increment(curr_dun, 1);
@@ -492,13 +492,13 @@ bool blk_crypto_fallback_bio_prep(struct bio **bio_ptr)
 
 	if (WARN_ON_ONCE(!tfms_inited[bc->bc_key->crypto_cfg.crypto_mode])) {
 		/* User didn't call blk_crypto_start_using_key() first */
-		bio->bi_status = BLK_STS_IOERR;
+		bio_set_status(bio, BLK_STS_IOERR);
 		return false;
 	}
 
 	if (!__blk_crypto_cfg_supported(blk_crypto_fallback_profile,
 					&bc->bc_key->crypto_cfg)) {
-		bio->bi_status = BLK_STS_NOTSUPP;
+		bio_set_status(bio, BLK_STS_NOTSUPP);
 		return false;
 	}
 

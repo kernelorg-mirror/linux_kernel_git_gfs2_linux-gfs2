@@ -2731,7 +2731,7 @@ static int thin_bio_map(struct dm_target *ti, struct bio *bio)
 	thin_hook_bio(tc, bio);
 
 	if (tc->requeue_mode) {
-		bio->bi_status = BLK_STS_DM_REQUEUE;
+		bio_set_status(bio, BLK_STS_DM_REQUEUE);
 		bio_endio(bio);
 		return DM_MAPIO_SUBMITTED;
 	}

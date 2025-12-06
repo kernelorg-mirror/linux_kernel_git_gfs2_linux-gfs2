@@ -190,7 +190,7 @@ bool bio_integrity_prep(struct bio *bio)
 err_free_buf:
 	kfree(buf);
 err_end_io:
-	bio->bi_status = BLK_STS_RESOURCE;
+	bio_set_status(bio, BLK_STS_RESOURCE);
 	bio_endio(bio);
 	return false;
 }

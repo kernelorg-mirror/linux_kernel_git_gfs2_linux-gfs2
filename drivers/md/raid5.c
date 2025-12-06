@@ -5974,7 +5974,7 @@ static enum stripe_result make_stripe_request(struct mddev *mddev,
 	sh = raid5_get_active_stripe(conf, ctx, new_sector, flags);
 	if (unlikely(!sh)) {
 		/* cannot get stripe, just give-up */
-		bi->bi_status = BLK_STS_IOERR;
+		bio_set_status(bi, BLK_STS_IOERR);
 		return STRIPE_FAIL;
 	}
 
@@ -6037,7 +6037,7 @@ out_release:
 	raid5_release_stripe(sh);
 out:
 	if (ret == STRIPE_SCHEDULE_AND_RETRY && reshape_interrupted(mddev)) {
-		bi->bi_status = BLK_STS_RESOURCE;
+		bio_set_status(bi, BLK_STS_RESOURCE);
 		ret = STRIPE_WAIT_RESHAPE;
 		pr_err_ratelimited("dm-raid456: io across reshape position while reshape can't make progress");
 	}
