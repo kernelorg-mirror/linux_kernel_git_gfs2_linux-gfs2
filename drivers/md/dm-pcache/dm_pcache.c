@@ -74,7 +74,7 @@ static void end_req(struct kref *ref)
 		pcache_req_get(pcache_req);
 		defer_req(pcache_req);
 	} else {
-		bio->bi_status = errno_to_blk_status(ret);
+		bio_set_status(bio, errno_to_blk_status(ret));
 		bio_endio(bio);
 
 		if (atomic_dec_and_test(&pcache->inflight_reqs))

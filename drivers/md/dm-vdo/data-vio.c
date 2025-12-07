@@ -287,7 +287,7 @@ static void acknowledge_data_vio(struct data_vio *data_vio)
 	if (data_vio->is_partial)
 		vdo_count_bios(&vdo->stats.bios_acknowledged_partial, bio);
 
-	bio->bi_status = errno_to_blk_status(error);
+	bio_set_status(bio, errno_to_blk_status(error));
 	bio_endio(bio);
 }
 
