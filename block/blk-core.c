@@ -821,8 +821,8 @@ void submit_bio_noacct(struct bio *bio)
 		if (!bdev_write_cache(bdev)) {
 			bio->bi_opf &= ~(REQ_PREFLUSH | REQ_FUA);
 			if (!bio_sectors(bio)) {
-				status = BLK_STS_OK;
-				goto end_io;
+				bio_endio(bio);
+				return;
 			}
 		}
 	}
@@ -887,7 +887,7 @@ void submit_bio_noacct(struct bio *bio)
 not_supported:
 	status = BLK_STS_NOTSUPP;
 end_io:
-	bio->bi_status = status;
+	bio_set_status(bio, status);
 	bio_endio(bio);
 }
 EXPORT_SYMBOL(submit_bio_noacct);
