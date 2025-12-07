@@ -183,8 +183,10 @@ static void erofs_fscache_bio_endio(void *priv, ssize_t transferred_or_error)
 {
 	struct erofs_fscache_bio *io = priv;
 
-	if (IS_ERR_VALUE(transferred_or_error))
-		io->bio.bi_status = errno_to_blk_status(transferred_or_error);
+	if (IS_ERR_VALUE(transferred_or_error)) {
+		bio_set_status(&io->bio,
+			       errno_to_blk_status(transferred_or_error));
+	}
 	io->bio.bi_end_io(&io->bio);
 	BUILD_BUG_ON(offsetof(struct erofs_fscache_bio, io) != 0);
 	erofs_fscache_io_put(&io->io);
@@ -215,7 +217,7 @@ void erofs_fscache_submit_bio(struct bio *bio)
 	erofs_fscache_io_put(&io->io);
 	if (!ret)
 		return;
-	bio->bi_status = errno_to_blk_status(ret);
+	bio_set_status(bio, errno_to_blk_status(ret));
 	bio->bi_end_io(bio);
 }
 

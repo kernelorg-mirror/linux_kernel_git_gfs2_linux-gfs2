@@ -39,7 +39,7 @@ bool fscrypt_decrypt_bio(struct bio *bio)
 							   fi.offset);
 
 		if (err) {
-			bio->bi_status = errno_to_blk_status(err);
+			bio_set_status(bio, errno_to_blk_status(err));
 			return false;
 		}
 	}

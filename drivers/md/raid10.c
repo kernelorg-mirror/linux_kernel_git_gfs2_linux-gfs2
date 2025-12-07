@@ -1665,7 +1665,8 @@ static int raid10_handle_discard(struct mddev *mddev, struct bio *bio)
 		split_size = stripe_size - remainder;
 		split = bio_split(bio, split_size, GFP_NOIO, &conf->bio_split);
 		if (IS_ERR(split)) {
-			bio->bi_status = errno_to_blk_status(PTR_ERR(split));
+			bio_set_status(bio,
+				       errno_to_blk_status(PTR_ERR(split)));
 			bio_endio(bio);
 			return 0;
 		}
@@ -1682,7 +1683,8 @@ static int raid10_handle_discard(struct mddev *mddev, struct bio *bio)
 		split_size = bio_sectors(bio) - remainder;
 		split = bio_split(bio, split_size, GFP_NOIO, &conf->bio_split);
 		if (IS_ERR(split)) {
-			bio->bi_status = errno_to_blk_status(PTR_ERR(split));
+			bio_set_status(bio,
+				       errno_to_blk_status(PTR_ERR(split)));
 			bio_endio(bio);
 			return 0;
 		}

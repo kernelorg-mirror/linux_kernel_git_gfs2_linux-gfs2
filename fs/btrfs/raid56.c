@@ -1750,7 +1750,7 @@ void raid56_parity_write(struct bio *bio, struct btrfs_io_context *bioc)
 
 	rbio = alloc_rbio(fs_info, bioc);
 	if (IS_ERR(rbio)) {
-		bio->bi_status = errno_to_blk_status(PTR_ERR(rbio));
+		bio_set_status(bio, errno_to_blk_status(PTR_ERR(rbio)));
 		bio_endio(bio);
 		return;
 	}
@@ -2148,7 +2148,7 @@ void raid56_parity_recover(struct bio *bio, struct btrfs_io_context *bioc,
 
 	rbio = alloc_rbio(fs_info, bioc);
 	if (IS_ERR(rbio)) {
-		bio->bi_status = errno_to_blk_status(PTR_ERR(rbio));
+		bio_set_status(bio, errno_to_blk_status(PTR_ERR(rbio)));
 		bio_endio(bio);
 		return;
 	}

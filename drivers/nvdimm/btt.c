@@ -1468,7 +1468,7 @@ static void btt_submit_bio(struct bio *bio)
 					(op_is_write(bio_op(bio))) ? "WRITE" :
 					"READ",
 					(unsigned long long) iter.bi_sector, len);
-			bio->bi_status = errno_to_blk_status(err);
+			bio_set_status(bio, errno_to_blk_status(err));
 			break;
 		}
 	}

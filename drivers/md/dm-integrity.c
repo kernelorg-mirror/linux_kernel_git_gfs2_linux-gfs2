@@ -2593,7 +2593,7 @@ skip_spinlock:
 
 	bip = bio_integrity_alloc(bio, GFP_NOIO, 1);
 	if (IS_ERR(bip)) {
-		bio->bi_status = errno_to_blk_status(PTR_ERR(bip));
+		bio_set_status(bio, errno_to_blk_status(PTR_ERR(bip)));
 		bio_endio(bio);
 		return DM_MAPIO_SUBMITTED;
 	}
@@ -2661,7 +2661,7 @@ static void dm_integrity_inline_recheck(struct work_struct *w)
 		bip = bio_integrity_alloc(outgoing_bio, GFP_NOIO, 1);
 		if (IS_ERR(bip)) {
 			bio_put(outgoing_bio);
-			bio->bi_status = errno_to_blk_status(PTR_ERR(bip));
+			bio_set_status(bio, errno_to_blk_status(PTR_ERR(bip)));
 			bio_endio(bio);
 			return;
 		}
@@ -2679,7 +2679,7 @@ static void dm_integrity_inline_recheck(struct work_struct *w)
 		r = submit_bio_wait(outgoing_bio);
 		if (unlikely(r != 0)) {
 			bio_put(outgoing_bio);
-			bio->bi_status = errno_to_blk_status(r);
+			bio_set_status(bio, errno_to_blk_status(r));
 			bio_endio(bio);
 			return;
 		}

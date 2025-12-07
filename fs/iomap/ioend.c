@@ -87,7 +87,7 @@ int iomap_ioend_writeback_submit(struct iomap_writepage_ctx *wpc, int error)
 		error = -EIO;
 
 	if (error) {
-		ioend->io_bio.bi_status = errno_to_blk_status(error);
+		bio_set_status(&ioend->io_bio, errno_to_blk_status(error));
 		bio_endio(&ioend->io_bio);
 		return error;
 	}

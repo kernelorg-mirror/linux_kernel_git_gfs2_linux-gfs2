@@ -233,7 +233,7 @@ static void pmem_submit_bio(struct bio *bio)
 		ret = nvdimm_flush(nd_region, bio);
 
 	if (ret)
-		bio->bi_status = errno_to_blk_status(ret);
+		bio_set_status(bio, errno_to_blk_status(ret));
 
 	bio_endio(bio);
 }

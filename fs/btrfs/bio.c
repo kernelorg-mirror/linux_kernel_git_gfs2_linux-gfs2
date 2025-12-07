@@ -540,7 +540,7 @@ static void run_one_async_start(struct btrfs_work *work)
 
 	ret = btrfs_bio_csum(async->bbio);
 	if (ret)
-		async->bbio->bio.bi_status = errno_to_blk_status(ret);
+		bio_set_status(&async->bbio->bio, errno_to_blk_status(ret));
 }
 
 /*

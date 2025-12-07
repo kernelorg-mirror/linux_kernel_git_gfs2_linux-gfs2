@@ -217,7 +217,7 @@ static void __ebs_process_bios(struct work_struct *ws)
 		}
 
 		if (r < 0)
-			bio->bi_status = errno_to_blk_status(r);
+			bio_set_status(bio, errno_to_blk_status(r));
 	}
 
 	/*

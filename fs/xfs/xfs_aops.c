@@ -653,7 +653,7 @@ xfs_zoned_writeback_submit(
 
 	ioend->io_bio.bi_end_io = xfs_end_bio;
 	if (error) {
-		ioend->io_bio.bi_status = errno_to_blk_status(error);
+		bio_set_status(&ioend->io_bio, errno_to_blk_status(error));
 		bio_endio(&ioend->io_bio);
 		return error;
 	}

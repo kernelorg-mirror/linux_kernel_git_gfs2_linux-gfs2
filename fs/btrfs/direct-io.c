@@ -738,7 +738,7 @@ static void btrfs_dio_submit_io(const struct iomap_iter *iter, struct bio *bio,
 			btrfs_finish_ordered_extent(dio_data->ordered, NULL,
 						    file_offset, dip->bytes,
 						    !ret);
-			bio->bi_status = errno_to_blk_status(ret);
+			bio_set_status(bio, errno_to_blk_status(ret));
 			iomap_dio_bio_end_io(bio);
 			return;
 		}
