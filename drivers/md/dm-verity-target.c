@@ -544,7 +544,7 @@ static void verity_finish_io(struct dm_verity_io *io, blk_status_t status)
 	struct bio *bio = dm_bio_from_per_bio_data(io, v->ti->per_io_data_size);
 
 	bio->bi_end_io = io->orig_bi_end_io;
-	bio->bi_status = status;
+	bio_set_status(bio, status);
 
 	if (!static_branch_unlikely(&use_bh_wq_enabled) || !io->in_bh)
 		verity_fec_finish_io(io);

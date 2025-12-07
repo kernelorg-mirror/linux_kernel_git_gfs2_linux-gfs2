@@ -573,7 +573,7 @@ out:
 	next = bio_list_peek(&priv->list);
 	spin_unlock_irq(&priv->lock);
 
-	bio->bi_status = error;
+	bio_set_status(bio, error);
 	bio_endio(bio);
 	return next;
 }

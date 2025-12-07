@@ -420,7 +420,7 @@ static void clone_free(struct bio *clone)
 static void clone_endio(struct bio *clone)
 {
 	struct bio *bio = clone->bi_private;
-	bio->bi_status = clone->bi_status;
+	bio_set_status(bio, clone->bi_status);
 	clone_free(clone);
 	bio_endio(bio);
 }

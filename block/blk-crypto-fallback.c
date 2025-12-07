@@ -150,7 +150,7 @@ static void blk_crypto_fallback_encrypt_endio(struct bio *enc_bio)
 		mempool_free(enc_bio->bi_io_vec[i].bv_page,
 			     blk_crypto_bounce_page_pool);
 
-	src_bio->bi_status = enc_bio->bi_status;
+	bio_set_status(src_bio, enc_bio->bi_status);
 
 	bio_uninit(enc_bio);
 	kfree(enc_bio);
