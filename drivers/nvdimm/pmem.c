@@ -222,7 +222,7 @@ static void pmem_submit_bio(struct bio *bio)
 			rc = pmem_do_read(pmem, bvec.bv_page, bvec.bv_offset,
 				iter.bi_sector, bvec.bv_len);
 		if (rc) {
-			bio->bi_status = rc;
+			bio_set_status(bio, rc);
 			break;
 		}
 	}

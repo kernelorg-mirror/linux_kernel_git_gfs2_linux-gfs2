@@ -440,7 +440,7 @@ void blk_integrity_verify_iter(struct bio *bio, struct bvec_iter *saved_iter)
 		kunmap_local(kaddr);
 
 		if (ret) {
-			bio->bi_status = ret;
+			bio_set_status(bio, ret);
 			return;
 		}
 	}

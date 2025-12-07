@@ -376,6 +376,22 @@ void submit_bio(struct bio *bio);
 
 extern void bio_endio(struct bio *);
 
+/**
+ * bio_set_status - set the status of bio
+ * @bio: bio
+ * @status: a BLK_STS_* status code
+ *
+ * Set the status of @bio to @status unless @status is BLK_STS_OK (0).  In bio
+ * chains, this function may be called repeatedly on the same bio.  In that
+ * case, it can override a previous error, but it will never revert from an
+ * error back to BLK_STS_OK.
+ */
+static inline void bio_set_status(struct bio *bio, blk_status_t status)
+{
+	if (status != BLK_STS_OK)
+		WRITE_ONCE(bio->bi_status, status);
+}
+
 static inline void bio_io_error(struct bio *bio)
 {
 	bio->bi_status = BLK_STS_IOERR;

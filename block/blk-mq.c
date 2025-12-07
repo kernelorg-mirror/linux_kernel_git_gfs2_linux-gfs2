@@ -970,7 +970,7 @@ bool blk_update_request(struct request *req, blk_status_t error,
 		unsigned bio_bytes = min(bio->bi_iter.bi_size, nr_bytes);
 
 		if (unlikely(error))
-			bio->bi_status = error;
+			bio_set_status(bio, error);
 
 		if (bio_bytes == bio->bi_iter.bi_size) {
 			req->bio = bio->bi_next;
@@ -3206,7 +3206,7 @@ new_request:
 
 	ret = blk_crypto_rq_get_keyslot(rq);
 	if (ret != BLK_STS_OK) {
-		bio->bi_status = ret;
+		bio_set_status(bio, ret);
 		bio_endio(bio);
 		blk_mq_free_request(rq);
 		return;

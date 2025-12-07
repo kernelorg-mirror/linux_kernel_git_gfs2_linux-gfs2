@@ -292,7 +292,7 @@ static bool blk_crypto_fallback_encrypt_bio(struct bio **bio_ptr)
 	blk_st = blk_crypto_get_keyslot(blk_crypto_fallback_profile,
 					bc->bc_key, &slot);
 	if (blk_st != BLK_STS_OK) {
-		src_bio->bi_status = blk_st;
+		bio_set_status(src_bio, blk_st);
 		goto out_put_enc_bio;
 	}
 
@@ -395,7 +395,7 @@ static void blk_crypto_fallback_decrypt_bio(struct work_struct *work)
 	blk_st = blk_crypto_get_keyslot(blk_crypto_fallback_profile,
 					bc->bc_key, &slot);
 	if (blk_st != BLK_STS_OK) {
-		bio->bi_status = blk_st;
+		bio_set_status(bio, blk_st);
 		goto out_no_keyslot;
 	}
 

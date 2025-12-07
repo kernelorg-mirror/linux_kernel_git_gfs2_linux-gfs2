@@ -1190,7 +1190,8 @@ static void mg_complete(struct dm_cache_migration *mg, bool success)
 			if (success)
 				force_set_dirty(cache, cblock);
 			else if (mg->k.input)
-				mg->overwrite_bio->bi_status = mg->k.input;
+				bio_set_status(mg->overwrite_bio,
+					       mg->k.input);
 			else
 				mg->overwrite_bio->bi_status = BLK_STS_IOERR;
 			bio_endio(mg->overwrite_bio);
