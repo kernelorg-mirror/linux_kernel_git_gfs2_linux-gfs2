@@ -133,7 +133,6 @@ inline const char *blk_op_str(enum req_op op)
 EXPORT_SYMBOL_GPL(blk_op_str);
 
 #define blk_errors(_)									\
-	_(BLK_STS_OK,			0,		"")				\
 	_(BLK_STS_NOTSUPP,		-EOPNOTSUPP,	"operation not supported")	\
 	_(BLK_STS_TIMEOUT,		-ETIMEDOUT,	"timeout")			\
 	_(BLK_STS_NOSPC,		-ENOSPC,	"critical space allocation")	\
@@ -159,7 +158,7 @@ EXPORT_SYMBOL_GPL(blk_op_str);
 											\
 	_(BLK_STS_INVAL,		-EINVAL,	"invalid")
 
-blk_status_t errno_to_blk_status(int errno)
+blk_status_t __errno_to_blk_status(int errno)
 {
 	switch(errno) {
 #define _(_status, _errno, _name)		\
@@ -171,9 +170,9 @@ blk_status_t errno_to_blk_status(int errno)
 		return BLK_STS_IOERR;
 	}
 }
-EXPORT_SYMBOL_GPL(errno_to_blk_status);
+EXPORT_SYMBOL_GPL(__errno_to_blk_status);
 
-int blk_status_to_errno(blk_status_t status)
+int __blk_status_to_errno(blk_status_t status)
 {
 	switch(status) {
 #define _(_status, _errno, _name)		\
@@ -185,11 +184,13 @@ int blk_status_to_errno(blk_status_t status)
 		return -EIO;
 	}
 }
-EXPORT_SYMBOL_GPL(blk_status_to_errno);
+EXPORT_SYMBOL_GPL(__blk_status_to_errno);
 
 const char *blk_status_to_str(blk_status_t status)
 {
 	switch(status) {
+	case BLK_STS_OK:
+		return "";
 #define _(_status, _errno, _name)		\
 	case _status:				\
 		return _name;
