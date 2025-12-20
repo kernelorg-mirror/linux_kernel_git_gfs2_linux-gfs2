@@ -132,69 +132,76 @@ inline const char *blk_op_str(enum req_op op)
 }
 EXPORT_SYMBOL_GPL(blk_op_str);
 
-static const struct {
-	int		errno;
-	const char	*name;
-} blk_errors[] = {
-	[BLK_STS_OK]		= { 0,		"" },
-	[BLK_STS_NOTSUPP]	= { -EOPNOTSUPP, "operation not supported" },
-	[BLK_STS_TIMEOUT]	= { -ETIMEDOUT,	"timeout" },
-	[BLK_STS_NOSPC]		= { -ENOSPC,	"critical space allocation" },
-	[BLK_STS_TRANSPORT]	= { -ENOLINK,	"recoverable transport" },
-	[BLK_STS_TARGET]	= { -EREMOTEIO,	"critical target" },
-	[BLK_STS_RESV_CONFLICT]	= { -EBADE,	"reservation conflict" },
-	[BLK_STS_MEDIUM]	= { -ENODATA,	"critical medium" },
-	[BLK_STS_PROTECTION]	= { -EILSEQ,	"protection" },
-	[BLK_STS_RESOURCE]	= { -ENOMEM,	"kernel resource" },
-	[BLK_STS_DEV_RESOURCE]	= { -EBUSY,	"device resource" },
-	[BLK_STS_AGAIN]		= { -EAGAIN,	"nonblocking retry" },
-	[BLK_STS_OFFLINE]	= { -ENODEV,	"device offline" },
-
-	/* device mapper special case, should not leak out: */
-	[BLK_STS_DM_REQUEUE]	= { -EREMCHG, "dm internal retry" },
-
-	/* zone device specific errors */
-	[BLK_STS_ZONE_OPEN_RESOURCE]	= { -ETOOMANYREFS, "open zones exceeded" },
-	[BLK_STS_ZONE_ACTIVE_RESOURCE]	= { -EOVERFLOW, "active zones exceeded" },
-
-	/* Command duration limit device-side timeout */
-	[BLK_STS_DURATION_LIMIT]	= { -ETIME, "duration limit exceeded" },
-
-	[BLK_STS_INVAL]		= { -EINVAL,	"invalid" },
-};
+#define blk_errors(_)									\
+	_(BLK_STS_OK,			0,		"")				\
+	_(BLK_STS_NOTSUPP,		-EOPNOTSUPP,	"operation not supported")	\
+	_(BLK_STS_TIMEOUT,		-ETIMEDOUT,	"timeout")			\
+	_(BLK_STS_NOSPC,		-ENOSPC,	"critical space allocation")	\
+	_(BLK_STS_TRANSPORT,		-ENOLINK,	"recoverable transport")	\
+	_(BLK_STS_TARGET,		-EREMOTEIO,	"critical target")		\
+	_(BLK_STS_RESV_CONFLICT,	-EBADE,		"reservation conflict")	\
+	_(BLK_STS_MEDIUM,		-ENODATA,	"critical medium")		\
+	_(BLK_STS_PROTECTION,		-EILSEQ,	"protection")			\
+	_(BLK_STS_RESOURCE,		-ENOMEM,	"kernel resource")		\
+	_(BLK_STS_DEV_RESOURCE,		-EBUSY,		"device resource")		\
+	_(BLK_STS_AGAIN,		-EAGAIN,	"nonblocking retry")		\
+	_(BLK_STS_OFFLINE,		-ENODEV,	"device offline")		\
+											\
+	/* device mapper special case, should not leak out: */				\
+	_(BLK_STS_DM_REQUEUE,		-EREMCHG,	"dm internal retry")		\
+											\
+	/* zone device specific errors */						\
+	_(BLK_STS_ZONE_OPEN_RESOURCE,	-ETOOMANYREFS,	"open zones exceeded")		\
+	_(BLK_STS_ZONE_ACTIVE_RESOURCE,	-EOVERFLOW,	"active zones exceeded" )	\
+											\
+	/* Command duration limit device-side timeout */				\
+	_(BLK_STS_DURATION_LIMIT,	-ETIME,		"duration limit exceeded")	\
+											\
+	_(BLK_STS_INVAL,		-EINVAL,	"invalid")
 
 blk_status_t errno_to_blk_status(int errno)
 {
-	int i;
-
-	for (i = 0; i < ARRAY_SIZE(blk_errors); i++) {
-		if (blk_errors[i].errno == errno)
-			return (__force blk_status_t)i;
+	switch(errno) {
+#define _(_status, _errno, _name)		\
+	case _errno:				\
+		return _status;
+	blk_errors(_)
+#undef _
+	default:
+		return BLK_STS_IOERR;
 	}
-
-	return BLK_STS_IOERR;
 }
 EXPORT_SYMBOL_GPL(errno_to_blk_status);
 
 int blk_status_to_errno(blk_status_t status)
 {
-	int idx = (__force int)status;
-
-	if (WARN_ON_ONCE(idx >= ARRAY_SIZE(blk_errors)))
+	switch(status) {
+#define _(_status, _errno, _name)		\
+	case _status:				\
+		return _errno;
+	blk_errors(_)
+#undef _
+	default:
 		return -EIO;
-	return blk_errors[idx].errno;
+	}
 }
 EXPORT_SYMBOL_GPL(blk_status_to_errno);
 
 const char *blk_status_to_str(blk_status_t status)
 {
-	int idx = (__force int)status;
-
-	if (WARN_ON_ONCE(idx >= ARRAY_SIZE(blk_errors)))
+	switch(status) {
+#define _(_status, _errno, _name)		\
+	case _status:				\
+		return _name;
+	blk_errors(_)
+#undef _
+	default:
 		return "I/O";
-	return blk_errors[idx].name;
+	}
 }
 EXPORT_SYMBOL_GPL(blk_status_to_str);
+
+#undef blk_errors
 
 /**
  * blk_sync_queue - cancel any pending callbacks on a queue
