@@ -1580,8 +1580,8 @@ static void do_endio(struct dm_integrity_c *ic, struct bio *bio)
 	int r;
 
 	r = dm_integrity_failed(ic);
-	if (unlikely(r) && !bio->bi_status)
-		bio->bi_status = errno_to_blk_status(r);
+	if (unlikely(r))
+		bio_set_status(bio, errno_to_blk_status(r));
 	if (unlikely(ic->synchronous_mode) && bio_op(bio) == REQ_OP_WRITE) {
 		unsigned long flags;
 

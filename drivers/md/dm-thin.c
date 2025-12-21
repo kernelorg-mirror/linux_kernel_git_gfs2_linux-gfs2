@@ -422,8 +422,7 @@ static void end_discard(struct discard_op *op, int r)
 	 * Even if r is set, there could be sub discards in flight that we
 	 * need to wait for.
 	 */
-	if (r && !op->parent_bio->bi_status)
-		op->parent_bio->bi_status = errno_to_blk_status(r);
+	bio_set_status(op->parent_bio, errno_to_blk_status(r));
 	bio_endio(op->parent_bio);
 }
 
