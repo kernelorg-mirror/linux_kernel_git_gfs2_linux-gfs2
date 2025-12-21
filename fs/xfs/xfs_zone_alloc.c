@@ -897,6 +897,9 @@ select_zone:
 
 out_split_error:
 	ioend->io_bio.bi_status = errno_to_blk_status(PTR_ERR(split));
+	bio_endio(&ioend->io_bio);
+	return;
+
 out_error:
 	bio_io_error(&ioend->io_bio);
 }
