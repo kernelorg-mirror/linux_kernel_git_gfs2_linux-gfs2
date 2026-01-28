@@ -985,13 +985,14 @@ static void empty_ail1_list(struct gfs2_sbd *sdp)
 
 /**
  * trans_drain - drain the buf and databuf queue for a failed transaction
+ * @sdp: Pointer to GFS2 superblock
  * @tr: the transaction to drain
  *
  * When this is called, we're taking an error exit for a log write that failed
  * but since we bypassed the after_commit functions, we need to remove the
  * items from the buf and databuf queue.
  */
-static void trans_drain(struct gfs2_trans *tr)
+static void trans_drain(struct gfs2_sbd *sdp, struct gfs2_trans *tr)
 {
 	struct gfs2_bufdata *bd;
 	struct list_head *head;
@@ -1005,7 +1006,7 @@ static void trans_drain(struct gfs2_trans *tr)
 		list_del_init(&bd->bd_list);
 		if (!list_empty(&bd->bd_ail_st_list))
 			gfs2_remove_from_ail(bd);
-		kmem_cache_free(gfs2_bufdata_cachep, bd);
+		kmem_cache_free(sdp->sd_bufdata, bd);
 	}
 	head = &tr->tr_databuf;
 	while (!list_empty(head)) {
@@ -1013,7 +1014,7 @@ static void trans_drain(struct gfs2_trans *tr)
 		list_del_init(&bd->bd_list);
 		if (!list_empty(&bd->bd_ail_st_list))
 			gfs2_remove_from_ail(bd);
-		kmem_cache_free(gfs2_bufdata_cachep, bd);
+		kmem_cache_free(sdp->sd_bufdata, bd);
 	}
 }
 
@@ -1151,7 +1152,7 @@ out:
 	return;
 
 out_withdraw:
-	trans_drain(tr);
+	trans_drain(sdp, tr);
 	/**
 	 * If the tr_list is empty, we're withdrawing during a log
 	 * flush that targets a transaction, but the transaction was

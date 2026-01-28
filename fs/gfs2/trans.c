@@ -168,9 +168,10 @@ void gfs2_trans_end(struct gfs2_sbd *sdp)
 static struct gfs2_bufdata *gfs2_alloc_bufdata(struct gfs2_glock *gl,
 					       struct buffer_head *bh)
 {
+	struct gfs2_sbd *sdp = gl->gl_name.ln_sbd;
 	struct gfs2_bufdata *bd;
 
-	bd = kmem_cache_zalloc(gfs2_bufdata_cachep, GFP_NOFS | __GFP_NOFAIL);
+	bd = kmem_cache_zalloc(sdp->sd_bufdata, GFP_NOFS | __GFP_NOFAIL);
 	bd->bd_bh = bh;
 	bd->bd_gl = gl;
 	INIT_LIST_HEAD(&bd->bd_list);
@@ -337,7 +338,7 @@ void gfs2_trans_remove_revoke(struct gfs2_sbd *sdp, u64 blkno, unsigned int len)
 			sdp->sd_log_num_revoke--;
 			if (bd->bd_gl)
 				gfs2_glock_remove_revoke(bd->bd_gl);
-			kmem_cache_free(gfs2_bufdata_cachep, bd);
+			kmem_cache_free(sdp->sd_bufdata, bd);
 			gfs2_log_release_revokes(sdp, 1);
 			if (--n == 0)
 				break;

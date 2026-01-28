@@ -638,6 +638,7 @@ restart:
 	gfs2_gl_hash_clear(sdp);
 	iput(sdp->sd_inode);
 	gfs2_delete_debugfs_file(sdp);
+	kmem_cache_destroy(sdp->sd_bufdata);
 
 	gfs2_sys_fs_del(sdp);
 	free_sbd(sdp);

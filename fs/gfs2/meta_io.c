@@ -363,7 +363,7 @@ void gfs2_remove_from_journal(struct buffer_head *bh, int meta)
 			gfs2_trans_add_revoke(sdp, bd);
 		} else if (was_pinned) {
 			bh->b_private = NULL;
-			kmem_cache_free(gfs2_bufdata_cachep, bd);
+			kmem_cache_free(sdp->sd_bufdata, bd);
 		} else if (!list_empty(&bd->bd_ail_st_list) &&
 					!list_empty(&bd->bd_ail_gl_list)) {
 			gfs2_remove_from_ail(bd);
