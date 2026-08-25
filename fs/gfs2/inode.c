@@ -286,16 +286,25 @@ fail_iput:
  * gfs2_lookup_meta - Look up an inode in a metadata directory
  * @dip: The directory
  * @name: The name of the inode
+ * @fmt: The file type
  */
-struct inode *gfs2_lookup_meta(struct inode *dip, const char *name)
+struct inode *gfs2_lookup_meta(struct inode *dip, const char *name, mode_t fmt)
 {
+	struct gfs2_glock *gl;
+	struct gfs2_holder gh;
+	struct gfs2_sbd *sdp = GFS2_SB(dip);
 	struct qstr qstr;
 	struct inode *inode;
+	int error = 0;
 
+	gfs2_holder_mark_uninitialized(&gh);
 	gfs2_str2qstr(&qstr, name);
 	inode = gfs2_lookupi(dip, &qstr, 1);
-	if (IS_ERR_OR_NULL(inode))
-		return inode ? inode : ERR_PTR(-ENOENT);
+	if (IS_ERR_OR_NULL(inode)) {
+		error = inode ? PTR_ERR(inode) : -ENOENT;
+		inode = NULL;
+		goto out;
+	}
 
 	/*
 	 * Must not call back into the filesystem when allocating
@@ -303,6 +312,36 @@ struct inode *gfs2_lookup_meta(struct inode *dip, const char *name)
 	 */
 	mapping_set_gfp_mask(inode->i_mapping, GFP_NOFS);
 
+	if ((inode->i_mode ^ fmt) & S_IFMT) {
+		fs_err(sdp, "meta inode '%s': wrong type 0%o (expected 0%o)\n",
+		       name, inode->i_mode & S_IFMT, fmt & S_IFMT);
+		error = -EINVAL;
+		goto out;
+	}
+
+	/*
+	 * Need to read in the inode to get the link count; locking the inode
+	 * glock causes that to happen.
+	 */
+	gl = gfs2_inode_glock(inode);
+	error = gfs2_glock_nq_init(gl, LM_ST_SHARED, 0, &gh);
+	if (error)
+		goto out;
+
+	if (S_ISDIR(fmt) ? (inode->i_nlink < 2) : (inode->i_nlink != 1)) {
+		fs_err(sdp, "meta inode '%s': invalid link count %u\n",
+		       name, inode->i_nlink);
+		error = -EINVAL;
+		goto out;
+	}
+
+out:
+	if (gfs2_holder_initialized(&gh))
+		gfs2_glock_dq_uninit(&gh);
+	if (error) {
+		iput(inode);
+		return ERR_PTR(error);
+	}
 	return inode;
 }
 

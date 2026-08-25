@@ -612,7 +612,7 @@ static int init_statfs(struct gfs2_sbd *sdp)
 	char buf[30];
 	struct gfs2_jdesc *jd;
 
-	sdp->sd_statfs_inode = gfs2_lookup_meta(master, "statfs");
+	sdp->sd_statfs_inode = gfs2_lookup_meta(master, "statfs", S_IFREG);
 	if (IS_ERR(sdp->sd_statfs_inode)) {
 		error = PTR_ERR(sdp->sd_statfs_inode);
 		fs_err(sdp, "can't read in statfs inode: %d\n", error);
@@ -621,7 +621,7 @@ static int init_statfs(struct gfs2_sbd *sdp)
 	if (sdp->sd_args.ar_spectator)
 		goto out;
 
-	pn = gfs2_lookup_meta(master, "per_node");
+	pn = gfs2_lookup_meta(master, "per_node", S_IFDIR);
 	if (IS_ERR(pn)) {
 		error = PTR_ERR(pn);
 		fs_err(sdp, "can't find per_node directory: %d\n", error);
@@ -638,7 +638,7 @@ static int init_statfs(struct gfs2_sbd *sdp)
 			goto free_local;
 		}
 		sprintf(buf, "statfs_change%u", jd->jd_jid);
-		lsi->si_sc_inode = gfs2_lookup_meta(pn, buf);
+		lsi->si_sc_inode = gfs2_lookup_meta(pn, buf, S_IFREG);
 		if (IS_ERR(lsi->si_sc_inode)) {
 			error = PTR_ERR(lsi->si_sc_inode);
 			fs_err(sdp, "can't find local \"sc\" file#%u: %d\n",
@@ -703,7 +703,7 @@ static int init_journal(struct gfs2_sbd *sdp, int undo)
 	if (undo)
 		goto fail_statfs;
 
-	sdp->sd_jindex = gfs2_lookup_meta(master, "jindex");
+	sdp->sd_jindex = gfs2_lookup_meta(master, "jindex", S_IFDIR);
 	if (IS_ERR(sdp->sd_jindex)) {
 		fs_err(sdp, "can't lookup journal index: %d\n", error);
 		return PTR_ERR(sdp->sd_jindex);
@@ -848,7 +848,7 @@ static int init_inodes(struct gfs2_sbd *sdp, int undo)
 		goto fail;
 
 	/* Read in the resource index inode */
-	sdp->sd_rindex = gfs2_lookup_meta(master, "rindex");
+	sdp->sd_rindex = gfs2_lookup_meta(master, "rindex", S_IFREG);
 	if (IS_ERR(sdp->sd_rindex)) {
 		error = PTR_ERR(sdp->sd_rindex);
 		fs_err(sdp, "can't get resource index inode: %d\n", error);
@@ -857,7 +857,7 @@ static int init_inodes(struct gfs2_sbd *sdp, int undo)
 	sdp->sd_rindex_uptodate = 0;
 
 	/* Read in the quota inode */
-	sdp->sd_quota_inode = gfs2_lookup_meta(master, "quota");
+	sdp->sd_quota_inode = gfs2_lookup_meta(master, "quota", S_IFREG);
 	if (IS_ERR(sdp->sd_quota_inode)) {
 		error = PTR_ERR(sdp->sd_quota_inode);
 		fs_err(sdp, "can't get quota file inode: %d\n", error);
@@ -901,7 +901,7 @@ static int init_per_node(struct gfs2_sbd *sdp, int undo)
 	if (undo)
 		goto fail_qc_gh;
 
-	pn = gfs2_lookup_meta(master, "per_node");
+	pn = gfs2_lookup_meta(master, "per_node", S_IFDIR);
 	if (IS_ERR(pn)) {
 		error = PTR_ERR(pn);
 		fs_err(sdp, "can't find per_node directory: %d\n", error);
@@ -909,7 +909,7 @@ static int init_per_node(struct gfs2_sbd *sdp, int undo)
 	}
 
 	sprintf(buf, "quota_change%u", sdp->sd_jdesc->jd_jid);
-	sdp->sd_qc_inode = gfs2_lookup_meta(pn, buf);
+	sdp->sd_qc_inode = gfs2_lookup_meta(pn, buf, S_IFREG);
 	if (IS_ERR(sdp->sd_qc_inode)) {
 		error = PTR_ERR(sdp->sd_qc_inode);
 		fs_err(sdp, "can't find local \"qc\" file: %d\n", error);
